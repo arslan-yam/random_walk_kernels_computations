@@ -1,0 +1,3 @@
+git+https://github.com/ysig/GraKeL.git
+torch
+torch_geometric
