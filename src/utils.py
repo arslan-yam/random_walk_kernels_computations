@@ -111,3 +111,4 @@ def mu_func_gen(kind="exp", lmbd=0.1):
             return lmbd ** k
         return mu
     raise ValueError(f"unknown kind: {kind}")
+

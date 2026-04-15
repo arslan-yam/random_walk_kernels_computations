@@ -7,5 +7,8 @@ dependencies = [
     "numpy",
     "scipy",
     "networkx",
+    "torch",
+    "torch_geometric",
+    "scikit-learn",
     "matplotlib"
 ]

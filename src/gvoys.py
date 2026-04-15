@@ -8,7 +8,7 @@ SIGMA = 0.1
 LAMBDA_COEFF = 0.1
 P_HALT = 0.2
 NB_RANDOM_WALKS = 1000
-BIG_NUMBER = 2000
+BIG_NUMBER = 10000
 
 t_variables = np.random.uniform(size=(2 * BIG_NUMBER, 2 * BIG_NUMBER))
 g_variables = np.where(np.random.normal(size=(2 * BIG_NUMBER, 2 * BIG_NUMBER)) > 0.0, 1.0, -1.0,)
@@ -129,3 +129,43 @@ def approximate_graph_kernel_value_with_blocks(P1, P2, v1, v2, w1, w2, anchor_fr
         )
 
     return approx_val * (block_size / nb_random_walks)
+
+def build_gvoys_features(P, v, w, anchor_fraction=1.0, base_nb_walk_index=0, kind="exp", lambda_coeff=LAMBDA_COEFF, p_halt=P_HALT, nb_random_walks=NB_RANDOM_WALKS):
+    P_adj_lists, P_weight_lists = adj_matrix_to_lists(P)
+    n = len(P_adj_lists)
+    nb_anc = max(1, int(anchor_fraction * n))
+    anc = np.random.choice(np.arange(n), size=nb_anc, replace=False)
+    anc = np.sort(anc)
+    anc_dict = dict(zip(anc, np.arange(nb_anc)))
+
+    if kind == "exp":
+        f_function = lambda i: f_func_diffusion(i, lambda_coeff)
+    elif kind == "geom":
+        f_function = lambda i: f_func_geometric(i, lambda_coeff)
+    else:
+        raise ValueError("kind must be 'exp' or 'geom'")
+
+    p_feat = create_pq_vectors(P_adj_lists, P_weight_lists, anc_dict, p_halt=p_halt, nb_random_walks=nb_random_walks, f=f_function, is_left=0, base_nb_walk_index=base_nb_walk_index)
+    q_feat = create_pq_vectors(P_adj_lists, P_weight_lists, anc_dict, p_halt=p_halt, nb_random_walks=nb_random_walks, f=f_function, is_left=1, base_nb_walk_index=base_nb_walk_index)
+    latent_embedding = np.einsum("br,br->br", np.einsum("brN,N->br", p_feat, v), np.einsum("brN,N->br", q_feat, w))
+    return latent_embedding
+
+
+def gvoys_kernel_from_features(feat1, feat2, nb_random_walks=NB_RANDOM_WALKS):
+    final_batch = np.einsum("bx,by->bxy", feat1, feat2)
+    return (1.0 / nb_random_walks) * np.sum(final_batch)
+
+
+def random_walk_kernel_gvoys_dataset(Ps, vs, ws, anchor_fraction=1.0, kind="exponential", lambda_coeff=LAMBDA_COEFF, p_halt=P_HALT, nb_random_walks=NB_RANDOM_WALKS):
+    n_graphs = len(Ps)
+    graph_features = []
+    for i in range(n_graphs):
+        graph_features.append(build_gvoys_features(Ps[i], vs[i], ws[i], anchor_fraction=anchor_fraction, base_nb_walk_index=0, kind=kind, lambda_coeff=lambda_coeff, p_halt=p_halt, nb_random_walks=nb_random_walks))
+
+    gram_matrix = np.zeros((n_graphs, n_graphs), dtype=float)
+    for i in range(n_graphs):
+        for j in range(i + 1):
+            gram_matrix[i, j] = gvoys_kernel_from_features(graph_features[i], graph_features[j], nb_random_walks=nb_random_walks)
+            gram_matrix[j, i] = gram_matrix[i, j]
+
+    return gram_matrix

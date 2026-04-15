@@ -53,6 +53,16 @@ def sample_length(kind, mu_func, rng):
     #     return sin_taylor()
         
     raise ValueError(f"unsupported kind: {kind}")
+
+def build_features(P, v, w, shared_random_variables, n_samples, rng):
+    samples = np.zeros(n_samples, dtype=float)
+    for i in range(n_samples):
+        len_walk = shared_random_variables[i]
+        x = rng.choice(len(v), p=v) #sample starting point from distribution v
+        for j in range(len_walk):
+            x = rng.choice(P.shape[1], p=P[x]) #random walk step
+        samples[i] = w[x]
+    return samples
     
 def get_samples(P, v, w, shared_random_variables, n_samples, rng):
     samples = np.zeros(n_samples, dtype=float)
@@ -75,21 +85,25 @@ def random_walk_kernel_mc(P1, P2, v1, v2, w1, w2, mu_func, kind, n_samples=100, 
     return C * (g1_samples * g2_samples).mean()
 
 def random_walk_kernel_mc_dataset(Ps, vs, ws, mu_func, kind, n_samples, seed):
-    '''
-    "linear" time with respect to dataset size& we precompute samples for each graph and then we can compare each pair almost with constant time
-    '''
     rng = np.random.default_rng(seed)
+    n_graphs = len(Ps)
     C = kernel_normalizer(kind, mu_func)
+
     shared_random_variables = np.zeros(n_samples, dtype=int)
     for i in range(n_samples):
         shared_random_variables[i] = sample_length(kind, mu_func, rng)
-     
-    n_graphs = len(Ps)
-    graph_samples = np.zeros(n_graphs)
-    for i in range(len(Ps)):
-        graph_samples[i] = get_samples(Ps[i], vs[i], ws[i], shared_random_variables, n_samples)
-        
-    return graph_samples, C
+
+    graph_features = np.zeros((n_graphs, n_samples), dtype=float)
+    for i in range(n_graphs):
+        graph_features[i] = build_features(Ps[i], vs[i], ws[i], shared_random_variables, n_samples, rng)
+
+    gram_matrix = np.zeros((n_graphs, n_graphs), dtype=float)
+    for i in range(n_graphs):
+        for j in range(i + 1):
+            gram_matrix[i, j] = C * (graph_features[i] * graph_features[j]).mean()
+            gram_matrix[j, i] = gram_matrix[i, j]
+
+    return gram_matrix
 
 # --- Labeled case ---
 def sample_label_seq(common_labels, q, K, n_label_samples_per_length, rng):
