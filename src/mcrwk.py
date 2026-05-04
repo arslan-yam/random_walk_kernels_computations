@@ -1,6 +1,10 @@
 import numpy as np
 import math
 from scipy.special import factorial
+import scipy.linalg as la
+import scipy.sparse as sp
+from scipy.sparse.linalg import cg, LinearOperator, spsolve, expm as sparse_expm
+
 
 
 class TaylorGenerator(np.random.Generator):
@@ -54,23 +58,29 @@ def sample_length(kind, mu_func, rng):
         
     raise ValueError(f"unsupported kind: {kind}")
 
+def _prepare_sampling_rows(P):
+    P = sp.csr_matrix(P)
+    P.sort_indices()
+    rows = []
+    for i in range(P.shape[0]):
+        start, end = P.indptr[i], P.indptr[i + 1]
+        neigh = P.indices[start:end]
+        probs = P.data[start:end]
+        if neigh.size == 0:
+            neigh = np.array([i], dtype=int)
+            probs = np.array([1.0], dtype=float)
+        rows.append((neigh, probs))
+    return rows
+
 def build_features(P, v, w, shared_random_variables, n_samples, rng):
+    rows = _prepare_sampling_rows(P)
     samples = np.zeros(n_samples, dtype=float)
     for i in range(n_samples):
         len_walk = shared_random_variables[i]
-        x = rng.choice(len(v), p=v) #sample starting point from distribution v
-        for j in range(len_walk):
-            x = rng.choice(P.shape[1], p=P[x]) #random walk step
-        samples[i] = w[x]
-    return samples
-    
-def get_samples(P, v, w, shared_random_variables, n_samples, rng):
-    samples = np.zeros(n_samples, dtype=float)
-    for i in range(n_samples):
-        len_walk = shared_random_variables[i]
-        x = rng.choice(len(v), p=v) #sample starting point from distribution v
-        for j in range(len_walk):
-            x = rng.choice(P.shape[1], p=P[x]) #random walk step
+        x = rng.choice(len(v), p=v)
+        for _ in range(len_walk):
+            neigh, probs = rows[x]
+            x = rng.choice(neigh, p=probs)
         samples[i] = w[x]
     return samples
 
@@ -79,9 +89,9 @@ def random_walk_kernel_mc(P1, P2, v1, v2, w1, w2, mu_func, kind, n_samples=100, 
     C = kernel_normalizer(kind, mu_func)
     shared_random_variables = np.zeros(n_samples, dtype=int)
     for i in range(n_samples):
-        shared_random_variables[i] = sample_length(kind, mu_func, rng)  
-    g1_samples = get_samples(P1, v1, w1, shared_random_variables, n_samples, rng)
-    g2_samples = get_samples(P2, v2, w2, shared_random_variables, n_samples, rng)
+        shared_random_variables[i] = sample_length(kind, mu_func, rng)
+    g1_samples = build_features(P1, v1, w1, shared_random_variables, n_samples, rng)
+    g2_samples = build_features(P2, v2, w2, shared_random_variables, n_samples, rng)
     return C * (g1_samples * g2_samples).mean()
 
 def random_walk_kernel_mc_dataset(Ps, vs, ws, mu_func, kind, n_samples, seed):
@@ -109,49 +119,63 @@ def random_walk_kernel_mc_dataset(Ps, vs, ws, mu_func, kind, n_samples, seed):
 def sample_label_seq(common_labels, q, K, n_label_samples_per_length, rng):
     label_seqs = []
     q_prods = np.ones(n_label_samples_per_length, dtype=float)
-    
+
     for i in range(n_label_samples_per_length):
         ids = rng.choice(len(common_labels), size=K, p=q)
         seq = [common_labels[j] for j in ids]
         label_seqs.append(seq)
         q_prods[i] = float(np.prod(q[ids]))
-    
+
     return label_seqs, q_prods
+
+def _fro_norm(M):
+    if sp.issparse(M):
+        return float(np.sqrt(np.sum(M.data ** 2)))
+    return float(np.linalg.norm(M, ord="fro"))
+
+def _l1_sum(M):
+    if sp.issparse(M):
+        return float(np.sum(np.abs(M.data)))
+    return float(np.sum(np.abs(M)))
 
 def prepare_P(P):
     P_sampling = {}
-    
     for label, P_label in P.items():
+        P_label = sp.csr_matrix(P_label)
+        P_label.sort_indices()
         dist_for_nodes = []
         for i in range(P_label.shape[0]):
-            row = P_label[i]
-            row_sum = row.sum()
+            start, end = P_label.indptr[i], P_label.indptr[i + 1]
+            neigh = P_label.indices[start:end]
+            probs = P_label.data[start:end]
+            row_sum = float(probs.sum())
             if row_sum > 0:
-                neigh = np.where(row > 0)[0]
-                probs = row[neigh] / row_sum
+                probs = probs / row_sum
             else:
                 neigh = np.array([], dtype=int)
                 probs = np.array([], dtype=float)
-            dist_for_nodes.append(((neigh, probs, row_sum)))
+            dist_for_nodes.append((neigh, probs, row_sum))
         P_sampling[label] = dist_for_nodes
 
     return P_sampling
 
-def process_sequence_multi(P_sampling, v, w, label_seq, n_reps, rng):
+def process_sequence_labeled(P_sampling, v, w, label_seq, n_reps, rng):
     total = 0.0
     for _ in range(n_reps):
         x = rng.choice(len(v), p=v)
         weight = 1.0
         for label in label_seq:
+            if label not in P_sampling:
+                weight = 0.0
+                break
             neigh, probs, row_sum = P_sampling[label][x]
             if row_sum == 0.0:
                 weight = 0.0
                 break
             weight *= row_sum
             x = rng.choice(neigh, p=probs)
-        total += weight * w[x] if weight != 0.0 else 0.0
+        total += weight * w[x]
     return total / n_reps
-
 
 def build_features_labeled(P, v, w, shared_lengths, shared_label_seqs, shared_q_prods, n_length_samples, n_label_samples_per_length, n_walk_reps, rng):
     P_sampling = prepare_P(P)
@@ -160,37 +184,39 @@ def build_features_labeled(P, v, w, shared_lengths, shared_label_seqs, shared_q_
         for j in range(n_label_samples_per_length):
             curr_seq = shared_label_seqs[i][j]
             curr_seq_prob = shared_q_prods[i][j]
-            s = process_sequence_multi(P_sampling, v, w, curr_seq, n_walk_reps, rng)
+            s = process_sequence_labeled(P_sampling, v, w, curr_seq, n_walk_reps, rng)
             features[i, j] = s / math.sqrt(curr_seq_prob)
-
     return features
 
+def q_sampling(P1, P2, common_labels, q_sampling_kind="uniform"):
+    d = len(common_labels)
+    if d == 0:
+        raise ValueError("no common labels")
 
-def q_sampling(P1, P2, d, common_labels, q_sampling_kind="uniform"):
     if q_sampling_kind == "uniform":
         return np.ones(d, dtype=float) / d
-    elif q_sampling_kind == "random":
+
+    if q_sampling_kind == "random":
         x = np.random.random(d)
         return x / x.sum()
-    
-    elif q_sampling_kind == "norm_fro":
+
+    if q_sampling_kind == "norm_fro":
         scores = np.zeros(d, dtype=float)
         for i, lab in enumerate(common_labels):
-            scores[i] = np.linalg.norm(P1[lab], ord="fro") * np.linalg.norm(P2[lab], ord="fro")
+            scores[i] = _fro_norm(P1[lab]) * _fro_norm(P2[lab])
         if np.all(scores == 0):
             return np.ones(d, dtype=float) / d
         return scores / scores.sum()
 
-    elif q_sampling_kind == "norm_l1":
+    if q_sampling_kind == "norm_l1":
         scores = np.zeros(d, dtype=float)
         for i, lab in enumerate(common_labels):
-            scores[i] = np.sum(np.abs(P1[lab])) * np.sum(np.abs(P2[lab]))
+            scores[i] = _l1_sum(P1[lab]) * _l1_sum(P2[lab])
         if np.all(scores == 0):
             return np.ones(d, dtype=float) / d
         return scores / scores.sum()
 
     raise ValueError("unknown kind")
-
 
 def random_walk_kernel_mc_labeled(P1, P2, v1, v2, w1, w2, mu_func, kind, n_length_samples=200, n_label_samples_per_length=50, n_walk_reps=10, q_sampling_kind="norm_fro", seed=42):
     rng = np.random.default_rng(seed)
@@ -199,12 +225,12 @@ def random_walk_kernel_mc_labeled(P1, P2, v1, v2, w1, w2, mu_func, kind, n_lengt
     d = len(common_labels)
     if d == 0:
         return 0.0
-    q = q_sampling(P1, P2, d, common_labels, q_sampling_kind=q_sampling_kind)
 
+    q = q_sampling(P1, P2, common_labels, q_sampling_kind=q_sampling_kind)
     shared_lengths = np.zeros(n_length_samples, dtype=int)
     shared_label_seqs = []
     shared_q_prods = []
-    
+
     for i in range(n_length_samples):
         K = sample_length(kind, mu_func, rng)
         shared_lengths[i] = K
@@ -215,3 +241,77 @@ def random_walk_kernel_mc_labeled(P1, P2, v1, v2, w1, w2, mu_func, kind, n_lengt
     g1 = build_features_labeled(P1, v1, w1, shared_lengths, shared_label_seqs, shared_q_prods, n_length_samples, n_label_samples_per_length, n_walk_reps, rng)
     g2 = build_features_labeled(P2, v2, w2, shared_lengths, shared_label_seqs, shared_q_prods, n_length_samples, n_label_samples_per_length, n_walk_reps, rng)
     return C * (g1 * g2).mean(axis=1).mean()
+
+def q_sampling_dataset(Ps, all_labels, q_sampling_kind="uniform"):
+    d = len(all_labels)
+    if d == 0:
+        raise ValueError("no common labels")
+
+    if q_sampling_kind == "uniform":
+        return np.ones(d, dtype=float) / d
+
+    if q_sampling_kind == "random":
+        x = np.random.random(d)
+        return x / x.sum()
+
+    if q_sampling_kind == "norm_fro":
+        scores = np.zeros(d, dtype=float)
+        for i, lab in enumerate(all_labels):
+            s = 0.0
+            for P in Ps:
+                if lab in P:
+                    s += _fro_norm(P[lab])
+            scores[i] = s
+        if np.all(scores == 0):
+            return np.ones(d, dtype=float) / d
+        return scores / scores.sum()
+
+    if q_sampling_kind == "norm_l1":
+        scores = np.zeros(d, dtype=float)
+        for i, lab in enumerate(all_labels):
+            s = 0.0
+            for P in Ps:
+                if lab in P:
+                    s += _l1_sum(P[lab])
+            scores[i] = s
+        if np.all(scores == 0):
+            return np.ones(d, dtype=float) / d
+        return scores / scores.sum()
+
+    raise ValueError("unknown kind")
+
+def random_walk_kernel_mc_labeled_dataset(Ps, vs, ws, mu_func, kind, n_length_samples=200, n_label_samples_per_length=50, n_walk_reps=1, q_sampling_kind="uniform", seed=42):
+    rng = np.random.default_rng(seed)
+    n_graphs = len(Ps)
+    C = kernel_normalizer(kind, mu_func)
+
+    all_labels = sorted(set().union(*[set(P.keys()) for P in Ps]))
+    d = len(all_labels)
+
+    if d == 0:
+        return np.zeros((n_graphs, n_graphs), dtype=float)
+
+    q = q_sampling_dataset(Ps, all_labels, q_sampling_kind=q_sampling_kind)
+    shared_lengths = np.zeros(n_length_samples, dtype=int)
+    shared_label_seqs = []
+    shared_q_prods = []
+
+    for i in range(n_length_samples):
+        K = sample_length(kind, mu_func, rng)
+        shared_lengths[i] = K
+        label_seqs, q_prods = sample_label_seq(all_labels, q, K, n_label_samples_per_length, rng)
+        shared_label_seqs.append(label_seqs)
+        shared_q_prods.append(q_prods)
+
+    graph_features = []
+    for i in range(n_graphs):
+        gi_feature = build_features_labeled(Ps[i], vs[i], ws[i], shared_lengths, shared_label_seqs, shared_q_prods, n_length_samples, n_label_samples_per_length, n_walk_reps, rng)
+        graph_features.append(gi_feature)
+
+    gram_matrix = np.zeros((n_graphs, n_graphs), dtype=float)
+    for i in range(n_graphs):
+        for j in range(i + 1):
+            value = C * (graph_features[i] * graph_features[j]).mean(axis=1).mean()
+            gram_matrix[i, j] = value
+            gram_matrix[j, i] = value
+    return gram_matrix

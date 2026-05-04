@@ -5,10 +5,12 @@ requires-python = ">=3.11"
 dependencies = [
     "ipykernel",
     "numpy",
+    "pandas",
     "scipy",
     "networkx",
     "torch",
     "torch_geometric",
     "scikit-learn",
-    "matplotlib"
+    "matplotlib",
+    "seaborn"
 ]

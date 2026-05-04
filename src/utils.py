@@ -1,9 +1,13 @@
 import numpy as np
 import networkx as nx
 import math
+import scipy.linalg as la
+import scipy.sparse as sp
+from scipy.sparse.linalg import cg, LinearOperator, spsolve, expm as sparse_expm
 
 
-def graph_generator(n, kind="er", seed=None):
+
+def graph_generator(n, kind="er", seed=None, p_er=None):
     """
     er for Erdos-Renyi;
     ba for Barabasi-Albert;
@@ -15,7 +19,9 @@ def graph_generator(n, kind="er", seed=None):
         #Erdos-Renyi
         #p = 2.0/n gives us a moderately sparse graph:
         #E[deg] = (n - 1) * p = 2
-        return nx.erdos_renyi_graph(n=n, p=float(2.0/n), seed=seed)
+        if p_er is None:
+            p_er = float(2.0/n)
+        return nx.erdos_renyi_graph(n=n, p=p_er, seed=seed)
     
     if kind == "ba":
         #Barabasi-Albert (preferential attachment)
@@ -55,42 +61,48 @@ def graph_generator_labeled(n, kind="er", n_labels=3, seed=None):
 
 
 def normalized_adj_matrix(graph):
-    A = nx.to_numpy_array(graph, dtype=float)
-    deg = A.sum(axis=1)
+    A = nx.to_scipy_sparse_array(graph, dtype=float, format="csr")
+    deg = np.asarray(A.sum(axis=1)).ravel()
 
-    P = np.zeros_like(A, dtype=float)
-    for i in range(A.shape[0]):
-        if deg[i] > 0:
-            P[i] = A[i] / deg[i]
-        else:
-            P[i, i] = 1.0
+    inv_deg = np.zeros_like(deg, dtype=float)
+    mask = deg > 0
+    inv_deg[mask] = 1.0 / deg[mask]
 
-    return P
+    P = sp.diags(inv_deg, format="csr") @ A
+    if np.any(~mask):
+        P = P + sp.diags((~mask).astype(float), format="csr")
+
+    return P.tocsr()
 
 def normalized_adj_matrix_labeled(graph):
     nodes = list(graph.nodes())
     n = len(nodes)
     idx = {u: i for i, u in enumerate(nodes)}
-    A_labels = {}
+
+    rows_by_label = {}
+    cols_by_label = {}
     deg = np.zeros(n, dtype=float)
 
     for u, v, data in graph.edges(data=True):
         i, j = idx[u], idx[v]
         lab = int(data["label"])
-        if lab not in A_labels:
-            A_labels[lab] = np.zeros((n, n), dtype=float)
-        A_labels[lab][i, j] = 1.0
-        A_labels[lab][j, i] = 1.0
+        rows_by_label.setdefault(lab, []).extend([i, j])
+        cols_by_label.setdefault(lab, []).extend([j, i])
         deg[i] += 1.0
         deg[j] += 1.0
 
+    inv_deg = np.zeros_like(deg, dtype=float)
+    mask = deg > 0
+    inv_deg[mask] = 1.0 / deg[mask]
+    Dinv = sp.diags(inv_deg, format="csr")
+
     P_labels = {}
-    for lab, A in A_labels.items():
-        P = np.zeros_like(A)
-        for i in range(n):
-            if deg[i] > 0:
-                P[i, :] = A[i, :] / deg[i]
-        P_labels[lab] = P
+    for lab in rows_by_label:
+        rows = np.asarray(rows_by_label[lab], dtype=int)
+        cols = np.asarray(cols_by_label[lab], dtype=int)
+        data = np.ones(rows.shape[0], dtype=float)
+        A_lab = sp.coo_matrix((data, (rows, cols)), shape=(n, n), dtype=float).tocsr()
+        P_labels[lab] = (Dinv @ A_lab).tocsr()
 
     return P_labels
 

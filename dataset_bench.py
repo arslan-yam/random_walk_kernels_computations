@@ -52,20 +52,20 @@ def bench(dataset, labels, kind, mu_func, n_samples_mc, n_samples_gvoys, seed=42
         vs.append(utils.uniform_dist(n))
         ws.append(utils.uniform_dist(n))
 
-    # direct
-    print("direct started")
-    t0 = time.perf_counter()
-    G_direct = gram.gram_direct(Ps, vs, ws, mu_func, kind)
-    t1 = time.perf_counter()
+    # # direct
+    # print("direct started")
+    # t0 = time.perf_counter()
+    # G_direct = gram.gram_direct(Ps, vs, ws, mu_func, kind)
+    # t1 = time.perf_counter()
     
-    acc_direct = evaluate_svm_on_gram(G_direct, labels)
+    # acc_direct = evaluate_svm_on_gram(G_direct, labels)
     
-    results["direct"] = {
-        "accuracy": acc_direct,
-        "time": t1 - t0,
-        "err": {"mean_abs": 0.0, "mean_rel": 0.0, "max_abs": 0.0, "max_rel": 0.0},
-    }
-    gram_mtx["direct"] = G_direct
+    # results["direct"] = {
+    #     "accuracy": acc_direct,
+    #     "time": t1 - t0,
+    #     "err": {"mean_abs": 0.0, "mean_rel": 0.0, "max_abs": 0.0, "max_rel": 0.0},
+    # }
+    # gram_mtx["direct"] = G_direct
 
     # sylvester
     print("sylvester started")
@@ -79,7 +79,7 @@ def bench(dataset, labels, kind, mu_func, n_samples_mc, n_samples_gvoys, seed=42
         results["sylvester"] = {
             "accuracy": acc_syl,
             "time": t1 - t0,
-            "err": gram.matrix_errors(G_direct, G_syl),
+            # "err": gram.matrix_errors(G_direct, G_syl),
         }
         gram_mtx["sylvester"] = G_syl
 
@@ -96,7 +96,7 @@ def bench(dataset, labels, kind, mu_func, n_samples_mc, n_samples_gvoys, seed=42
         results["fixed_point"] = {
             "accuracy": acc_fp,
             "time": t1 - t0,
-            "err": gram.matrix_errors(G_direct, G_fp),
+            # "err": gram.matrix_errors(G_direct, G_fp),
         }
         gram_mtx["fixed_point"] = G_fp
 
@@ -112,7 +112,7 @@ def bench(dataset, labels, kind, mu_func, n_samples_mc, n_samples_gvoys, seed=42
         results["cg"] = {
             "accuracy": acc_cg,
             "time": t1 - t0,
-            "err": gram.matrix_errors(G_direct, G_cg),
+            # "err": gram.matrix_errors(G_direct, G_cg),
         }
         gram_mtx["cg"] = G_cg
 
@@ -128,7 +128,7 @@ def bench(dataset, labels, kind, mu_func, n_samples_mc, n_samples_gvoys, seed=42
     results["gvoys"] = {
         "accuracy": acc_gv,
         "time": t1 - t0,
-        "err": gram.matrix_errors(G_direct, G_gv),
+        # "err": gram.matrix_errors(G_direct, G_gv),
     }
     gram_mtx["gvoys"] = G_gv
 
@@ -143,7 +143,7 @@ def bench(dataset, labels, kind, mu_func, n_samples_mc, n_samples_gvoys, seed=42
     results["mc"] = {
         "accuracy": acc_mc,
         "time": t1 - t0,
-        "err": gram.matrix_errors(G_direct, G_mc),
+        # "err": gram.matrix_errors(G_direct, G_mc),
     }
     gram_mtx["mc"] = G_mc
 
@@ -168,10 +168,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Benchmark graph kernel Gram matrix construction")
     parser.add_argument("--kind", choices=["exp", "geom"], default="geom", help="Kernel type")
     parser.add_argument("--lmbd", type=float, default=0.01, help="Lambda coefficient")
-    # parser.add_argument("--n-samples-mc", type=int, default=None, help="MC samples (default: 10 * n_nodes)")
-    # parser.add_argument("--n-samples-gvoys", type=int, default=None, help="GVoy samples (default: 10 * n_nodes)")
+    
+    parser.add_argument("--n_samples_mc", type=int, default=None, help="MC samples (default: 10 * mean_nodes)")
+    parser.add_argument("--n_samples_gvoys", type=int, default=None, help="GVoy samples (default: 10 * mean_nodes)")
+
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--dataset_name", choices=["ENZYMES", "MUTAG", "NCI1", "PTC-MR", "D&D", "PROTEINS", "AIDS"], default="MUTAG", help="Graph generator")
+    parser.add_argument("--dataset_name", choices=["ENZYMES", "MUTAG", "NCI1", "DD", "PROTEINS", "AIDS"], default="MUTAG", help="Graph generator")
     # parser.add_argument("--p-halt", type=float, default=0.2, help="Halt probability for GVoy")
     # parser.add_argument("--output", type=str, default=None, help="Save results to JSON file")
     return parser.parse_args()
@@ -187,11 +189,13 @@ if __name__ == "__main__":
 
     dataset, labels, mean_nodes = load_tudataset_with_labels(dataset_name)
 
-    n_samples_mc = 10 * mean_nodes
-    n_samples_gvoys = 10 * mean_nodes
-    
-    folder = f"./results/{dataset_name}"
-    os.makedirs(folder, exist_ok=True)
+    n_samples_mc = args.n_samples_mc
+    if n_samples_mc is None:
+        n_samples_mc = 10 * mean_nodes
+   
+    n_samples_gvoys = args.n_samples_gvoys
+    if n_samples_gvoys is None:
+        n_samples_gvoys = 10 * mean_nodes
     
     mu_func = utils.mu_func_gen(kernel_kind, lmbd=lmbd)
 
@@ -209,12 +213,14 @@ if __name__ == "__main__":
         seed=seed,
     )
 
-    results_output = f"{folder}/{kernel_kind} | seed={seed}.json"
+    folder = f"./results/{dataset_name}/{kernel_kind}"
+    os.makedirs(folder, exist_ok=True)
+
+    results_output = f"{folder}/seed={seed}.json"
     with open(results_output, "w") as f:        
         json.dump(results, f, indent=2, default=str)
     
-    gram_output = f"{folder}/{kernel_kind} | seed={seed}.pickle"
+    gram_output = f"{folder}/seed={seed}.pickle"
     with open(gram_output, 'wb') as f:
         pickle.dump(gram_mtx, f)
-
     print(f"Results saved to {results_output} and {gram_output}")

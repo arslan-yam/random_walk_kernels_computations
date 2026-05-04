@@ -4,17 +4,20 @@ import scipy
 from . import rwk
 
 
-def gram_direct(Ps, vs, ws, mu_func, kind):
+def gram_direct(Ps, vs, ws, mu_func, kind, labeled=False):
     n = len(Ps)
     G = np.zeros((n, n), dtype=float)
     for i in range(n):
         for j in range(i + 1):
-            G[i, j] = rwk.random_walk_kernel(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, kind=kind)
+            if labeled:
+                G[i, j] = rwk.random_walk_kernel_labeled(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, kind=kind)
+            else:
+                G[i, j] = rwk.random_walk_kernel(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, kind=kind)
             G[j, i] = G[i, j]
     return G
 
 
-def gram_sylvester(Ps, vs, ws, mu_func):
+def gram_sylvester(Ps, vs, ws, mu_func,):
     n = len(Ps)
     G = np.zeros((n, n), dtype=float)
     for i in range(n):
@@ -24,22 +27,28 @@ def gram_sylvester(Ps, vs, ws, mu_func):
     return G
 
 
-def gram_fixed_point(Ps, vs, ws, mu_func):
+def gram_fixed_point(Ps, vs, ws, mu_func, labeled=False):
     n = len(Ps)
     G = np.zeros((n, n), dtype=float)
     for i in range(n):
         for j in range(i + 1):
-            G[i, j] = rwk.random_walk_kernel_fixed_point(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, eps=1e-30, max_iter=5000)
+            if labeled:
+                G[i, j] = rwk.random_walk_kernel_fixed_point_labeled(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, eps=1e-30, max_iter=5000)
+            else:
+                G[i, j] = rwk.random_walk_kernel_fixed_point(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, eps=1e-30, max_iter=5000)
             G[j, i] = G[i, j]
     return G
 
 
-def gram_cg(Ps, vs, ws, mu_func):
+def gram_cg(Ps, vs, ws, mu_func, labeled=False):
     n = len(Ps)
     G = np.zeros((n, n), dtype=float)
     for i in range(n):
         for j in range(i + 1):
-            G[i, j] = rwk.random_walk_kernel_cg(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, eps=1e-30, max_iter=5000)
+            if labeled:
+                G[i, j] = rwk.random_walk_kernel_cg_labeled(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, eps=1e-30, max_iter=5000)
+            else:
+                G[i, j] = rwk.random_walk_kernel_cg(Ps[i], Ps[j], vs[i], vs[j], ws[i], ws[j], mu_func=mu_func, eps=1e-30, max_iter=5000)
             G[j, i] = G[i, j]
     return G
 

@@ -211,3 +211,4 @@ __marimo__/
 data
 .conda
 results
+.DS_Store
