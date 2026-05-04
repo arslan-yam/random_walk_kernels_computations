@@ -208,7 +208,7 @@ __marimo__/
 
 
 # Custom
-data
+tu_datasets
 .conda
 results
 .DS_Store
