@@ -354,10 +354,7 @@ def run_tu_benchmark(
     output_dir="results",
     save_grams=False,
 ):
-    """Run the full benchmark and return a list of result dictionaries."""
-    all_results = []
-    datasets_processed = 0
-
+    """Run benchmark and save per‑dataset JSON immediately."""
     for di, dataset_name in enumerate(dataset_names):
         ds_seed = seed + di
         print(f"\n[{dataset_name}] Loading …")
@@ -365,13 +362,18 @@ def run_tu_benchmark(
             graphs_all, y_all, _ = load_tu_dataset_unlabeled(dataset_name, root_dir=root_dir)
         except Exception as e:
             print(f"[{dataset_name}] SKIP: could not load ({e})")
-            all_results.append({
+            # Save a skip entry
+            row = {
                 "dataset": dataset_name,
                 "n_total": 0,
                 "n_used": 0,
                 "error": str(e),
                 "methods": {},
-            })
+            }
+            ds_out = os.path.join(output_dir, dataset_name)
+            os.makedirs(ds_out, exist_ok=True)
+            with open(os.path.join(ds_out, f"seed={ds_seed}_{distribution_func}.json"), "w") as f:
+                json.dump(row, f, indent=2, default=str)
             continue
 
         n_total = len(graphs_all)
@@ -385,31 +387,32 @@ def run_tu_benchmark(
             )
         except Exception as e:
             print(f"[{dataset_name}] SKIP: {e}")
-            all_results.append({
+            row = {
                 "dataset": dataset_name,
                 "n_total": int(n_total),
                 "n_used": 0,
                 "error": str(e),
                 "methods": {},
-            })
+            }
+            ds_out = os.path.join(output_dir, dataset_name)
+            os.makedirs(ds_out, exist_ok=True)
+            with open(os.path.join(ds_out, f"seed={ds_seed}_{distribution_func}.json"), "w") as f:
+                json.dump(row, f, indent=2, default=str)
             continue
 
         print(f"[{dataset_name}] Using {len(graphs)}/{n_total} graphs")
         Ps, vs, ws = build_unlabeled_rw_inputs(graphs, distribution_func)
 
-        # Determine maximum node size among selected graphs.
         max_n = max(P.shape[0] for P in Ps) if Ps else 0
 
-        # Fallback: skip methods that are too heavy for large graphs
-        # (similar to synthetic_bench.py thresholds)
+        # Drop methods that are too heavy for large graphs
         effective_methods = list(methods)
         if "direct" in effective_methods and max_n > 128:
-            print(f"  [info] skipping direct (max node > 128)")
+            print("  [info] skipping direct (max node > 128)")
             effective_methods.remove("direct")
         if "sylvester" in effective_methods and max_n > 512:
-            print(f"  [info] skipping Sylvester (max node > 512)")
+            print("  [info] skipping Sylvester (max node > 512)")
             effective_methods.remove("sylvester")
-        # Similarly, you can add more heuristics.
 
         row = {
             "dataset": dataset_name,
@@ -419,7 +422,7 @@ def run_tu_benchmark(
             "methods": {},
         }
 
-        # For methods that were dropped because of size, record skip
+        # Mark skipped methods
         for m in methods:
             if m not in effective_methods:
                 row["methods"][m] = {
@@ -432,15 +435,12 @@ def run_tu_benchmark(
                     "error": "skipped (graph too large for this method)",
                 }
 
-        # Iterate over methods that we actually run
         for mi, method in enumerate(effective_methods):
             method_seed = ds_seed + 100 * (mi + 1)
             try:
-                # Build mu_func fresh for each dataset (lambda may depend on d_max)
-                d_max = max(
-                    max(d for _, d in G.degree()) for G in graphs
-                )
-                lmbd = 1 / (d_max ** 2)   # as in GVoys paper (can be overridden)
+                # Compute lambda from max degree
+                d_max = max(max(d for _, d in G.degree()) for G in graphs)
+                lmbd = 1 / (d_max ** 2)
                 mu_func = utils.mu_func_gen(kind, lmbd=lmbd)
 
                 print(f"  Computing {method} kernel …")
@@ -460,7 +460,6 @@ def run_tu_benchmark(
                 if normalize_kernel:
                     K = normalize_gram_matrix(K)
 
-                # Evaluate SVM
                 t1 = time.perf_counter()
                 stats = evaluate_svm_precomputed(
                     K, y,
@@ -489,8 +488,10 @@ def run_tu_benchmark(
 
                 if save_grams:
                     gram_file = os.path.join(
-                        output_dir, f"{dataset_name}_{method}_gram.pickle"
+                        output_dir, dataset_name,
+                        f"{method}_seed={method_seed}.pickle"
                     )
+                    os.makedirs(os.path.dirname(gram_file), exist_ok=True)
                     with open(gram_file, "wb") as f:
                         pickle.dump(K, f)
 
@@ -506,11 +507,13 @@ def run_tu_benchmark(
                 }
                 print(f"  {method}: FAILED → {e}")
 
-        all_results.append(row)
-        datasets_processed += 1
-
-    return all_results
-
+        # Save per‑dataset JSON
+        ds_out = os.path.join(output_dir, dataset_name)
+        os.makedirs(ds_out, exist_ok=True)
+        ds_file = os.path.join(ds_out, f"seed={ds_seed}_{distribution_func}.json")
+        with open(ds_file, "w") as f:
+            json.dump(row, f, indent=2, default=str)
+        print(f"  → saved {ds_file}")
 
 # ----------------------------------------------------------------------
 #  CLI
@@ -564,18 +567,15 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    # Ensure output directory exists
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Some methods are only valid for geom kernel
+    # Remove methods incompatible with 'exp' kernel (if needed)
     if args.kind != "geom":
         invalid = {"cg", "sylvester", "fixed_point"}
         args.methods = [m for m in args.methods if m not in invalid]
-        if "cg" in invalid: print("Note: CG, Sylvester, fixed_point require geom kernel – removed.")
+        print("Note: CG, Sylvester, fixed_point require geom kernel – removed.")
 
     normalize_kernel = not args.no_normalize
-
-    # Global halt probability for GVoys (as used in the synthetic benchmark)
     P_HALT = 0.2
 
     print("Benchmark configuration:")
@@ -587,12 +587,13 @@ if __name__ == "__main__":
     print(f"  n_samples_mc: {args.n_samples_mc}")
     print(f"  n_samples_gvoys: {args.n_samples_gvoys}")
     print(f"  normalize: {normalize_kernel}")
+    print(f"  u_w_distribution: {args.u_w_distribution}")
     print(f"  output: {args.output_dir}")
 
-    results = run_tu_benchmark(
+    run_tu_benchmark(
         dataset_names=args.datasets,
         kind=args.kind,
-        mu_func_lambda=None,  # unused directly; lambda is recomputed per dataset
+        mu_func_lambda=None,
         methods=args.methods,
         max_graphs=args.max_graphs,
         max_nodes_per_graph=args.max_nodes_per_graph,
@@ -610,33 +611,33 @@ if __name__ == "__main__":
         save_grams=args.save_grams,
     )
 
-    # Compose output filename
-    fname_parts = [f"tu_{args.kind}"]
-    if args.experiment_name:
-        fname_parts.append(args.experiment_name)
-    fname_parts.append(f"seed{args.seed}")
-    out_file = os.path.join(args.output_dir, "_".join(fname_parts) + ".json")
+    # # Compose output filename
+    # fname_parts = [f"tu_{args.kind}_{args.u_w_distribution}"]
+    # if args.experiment_name:
+    #     fname_parts.append(args.experiment_name)
+    # fname_parts.append(f"seed{args.seed}")
+    # out_file = os.path.join(args.output_dir, "_".join(fname_parts) + ".json")
 
-    with open(out_file, "w") as f:
-        json.dump(results, f, indent=2, default=str)
+    # with open(out_file, "w") as f:
+    #     json.dump(results, f, indent=2, default=str)
 
-    print(f"\nAll results saved to {out_file}")
+    # print(f"\nAll results saved to {out_file}")
 
-    # Print a quick summary
-    print("\nSummary:")
-    for row in results:
-        print(f"{row['dataset']}: {row['n_used']}/{row['n_total']} graphs")
-        if row.get("error"):
-            print(f"  SKIP: {row['error']}")
-            continue
-        for m in args.methods:
-            info = row["methods"].get(m)
-            if info is None:
-                print(f"  {m}: no result")
-            elif info.get("error"):
-                print(f"  {m}: error ({info['error']})")
-            else:
-                print(f"  {m}: acc={100.0*info['mean_accuracy']:.2f}% "
-                      f"± {100.0*info['std_accuracy']:.2f}% "
-                      f"(gram {info['gram_time_sec']:.2f}s, "
-                      f"svm {info['svm_time_sec']:.2f}s)")
+    # # Print a quick summary
+    # print("\nSummary:")
+    # for row in results:
+    #     print(f"{row['dataset']}: {row['n_used']}/{row['n_total']} graphs")
+    #     if row.get("error"):
+    #         print(f"  SKIP: {row['error']}")
+    #         continue
+    #     for m in args.methods:
+    #         info = row["methods"].get(m)
+    #         if info is None:
+    #             print(f"  {m}: no result")
+    #         elif info.get("error"):
+    #             print(f"  {m}: error ({info['error']})")
+    #         else:
+    #             print(f"  {m}: acc={100.0*info['mean_accuracy']:.2f}% "
+    #                   f"± {100.0*info['std_accuracy']:.2f}% "
+    #                   f"(gram {info['gram_time_sec']:.2f}s, "
+    #                   f"svm {info['svm_time_sec']:.2f}s)")
