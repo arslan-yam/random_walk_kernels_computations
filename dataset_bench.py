@@ -1,12 +1,13 @@
-"""Benchmark graph kernel methods on TU datasets.
+"""Benchmark graph kernel methods on TU datasets (from www.chrsmrrs.com/graphkerneldatasets).
 
 For each dataset and each requested kernel method, the script:
-  1. Downloads and loads the dataset.
+  1. Downloads and loads the dataset (optionally with edge labels).
   2. Optionally filters graphs by maximum nodes and maximum number of graphs.
-  3. Builds normalized adjacency matrices and uniform starting/stopping distributions.
+  3. Builds normalized adjacency matrices and starting/stopping distributions.
   4. Computes the Gram matrix (with optional normalisation).
   5. Performs stratified SVM cross‑validation to measure classification accuracy.
-  6. Records timings and accuracy, and saves results to a JSON file.
+  6. Records timings, accuracy, and relative matrix errors (w.r.t. direct or CG).
+  7. Saves per‑dataset results to JSON files.
 """
 
 import argparse
@@ -25,13 +26,6 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from sklearn.svm import SVC
 
-# Assumes that the 'src' package is available and contains the same
-# functions used in synthetic_bench.py:
-#   utils: normalized_adj_matrix, uniform_dist, random_dist, mu_func_gen
-#   gram: gram_direct, gram_cg, gram_sylvester, gram_fixed_point, matrix_errors
-#   gvoys: random_walk_kernel_gvoys_dataset, random_walk_kernel_gvoys_dataset_block
-#   mcrwk: random_walk_kernel_mc_dataset
-# If these are not in the same directory, adjust sys.path accordingly.
 from src import utils
 from src import gram
 from src import gvoys
@@ -100,34 +94,68 @@ def download_tu_dataset(dataset_name, root_dir="data/tu_datasets", force_downloa
     return dataset_dir
 
 
-def load_tu_dataset_unlabeled(dataset_name, root_dir="data/tu_datasets", force_download=False):
+def load_tu_dataset(dataset_name, root_dir="data/tu_datasets", force_download=False, load_edge_labels=False):
+    """
+    Load a TU dataset as a list of networkx.Graph objects.
+    Returns:
+        graphs : list of nx.Graph
+        y : integer graph labels
+        graph_labels_raw : raw labels from file
+        edge_labels_used : bool (True if edge labels were actually loaded and attached)
+
+    If load_edge_labels is True, it tries to read _edge_labels.txt.
+    If that file exists, each edge gets an attribute 'label' (int).
+    If it does not exist, edge_labels_used will be False and edges will have no label.
+    Vertex labels (if any) are ignored entirely.
+    """
     dataset_dir = download_tu_dataset(dataset_name, root_dir=root_dir, force_download=force_download)
 
     indicator_path = dataset_dir / f"{dataset_name}_graph_indicator.txt"
     edges_path = dataset_dir / f"{dataset_name}_A.txt"
-    labels_path = dataset_dir / f"{dataset_name}_graph_labels.txt"
+    graph_labels_path = dataset_dir / f"{dataset_name}_graph_labels.txt"
+    edge_labels_path = dataset_dir / f"{dataset_name}_edge_labels.txt"
 
     graph_indicator = _read_int_list(indicator_path)
-    graph_labels_raw = np.asarray(_read_int_list(labels_path), dtype=int)
+    graph_labels_raw = np.asarray(_read_int_list(graph_labels_path), dtype=int)
 
     n_graphs = max(graph_indicator)
     graphs = [nx.Graph() for _ in range(n_graphs)]
 
+    # Add nodes without any label (vertex labels are ignored)
     for global_node_id, graph_id in enumerate(graph_indicator, start=1):
         graphs[graph_id - 1].add_node(global_node_id)
 
-    for u, v in _read_edge_list(edges_path):
+    # Add edges (without labels first)
+    edges = _read_edge_list(edges_path)
+    for u, v in edges:
         gu = graph_indicator[u - 1] - 1
         gv = graph_indicator[v - 1] - 1
         if gu != gv:
             continue
         graphs[gu].add_edge(u, v)
 
+    edge_labels_used = False
+    if load_edge_labels and edge_labels_path.exists():
+        edge_labels = _read_int_list(edge_labels_path)
+        # The edge_labels file has one label per line, in the same order as edges in _A.txt.
+        # We assume the edges list we read has the same order.
+        for idx, (u, v) in enumerate(edges):
+            gu = graph_indicator[u - 1] - 1
+            gv = graph_indicator[v - 1] - 1
+            if gu != gv:
+                continue
+            label = edge_labels[idx] if idx < len(edge_labels) else 0
+            # Attach the edge label as an integer attribute 'label'
+            graphs[gu].edges[u, v]['label'] = label
+        edge_labels_used = True
+    elif load_edge_labels:
+        print(f"  [info] Edge labels file not found for {dataset_name}, falling back to unlabeled.")
+
     _, y = np.unique(graph_labels_raw, return_inverse=True)
-    return graphs, y, graph_labels_raw
+    return graphs, y, graph_labels_raw, edge_labels_used
 
 
-def pick_graph_subset(graphs, y, max_graphs=20, max_nodes_per_graph=35, seed=42):
+def pick_graph_subset(graphs, y, max_graphs=None, max_nodes_per_graph=None, seed=42):
     """Select a class‑stratified subset of graphs that are small enough."""
     y = np.asarray(y)
     idx = np.arange(len(graphs))
@@ -163,12 +191,17 @@ def pick_graph_subset(graphs, y, max_graphs=20, max_nodes_per_graph=35, seed=42)
     return graphs_sub, y_sub, idx_sub
 
 
-def build_unlabeled_rw_inputs(graphs, distribution_func="uniform"):
+def build_rw_inputs(graphs, distribution_func="uniform", labeled=False):
     """Convert networkx graphs to adjacency matrices and distributions."""
     Ps, vs, ws = [], [], []
     for g in graphs:
-        P = utils.normalized_adj_matrix(g)
-        n = P.shape[0]
+        if labeled:
+            # uses edge labels (attribute 'label' on edges)
+            P = utils.normalized_adj_matrix_labeled(g)
+        else:
+            P = utils.normalized_adj_matrix(g)
+        # n = P.shape[0]
+        n = g.number_of_nodes() 
         Ps.append(P)
         if distribution_func == "uniform":
             vs.append(utils.uniform_dist(n))
@@ -317,8 +350,8 @@ def compute_kernel_matrix(method, Ps, vs, ws, kind, mu_func, lmbd,
         if labeled:
             return mcrwk.random_walk_kernel_mc_labeled_dataset(
                 Ps, vs, ws, mu_func=mu_func, kind=kind,
-                n_length_samples=n_samples_mc // 200,
-                n_label_samples_per_length=200,
+                n_length_samples=n_samples_mc // 100,
+                n_label_samples_per_length=100,
                 seed=seed
             )
         else:
@@ -337,7 +370,6 @@ def compute_kernel_matrix(method, Ps, vs, ws, kind, mu_func, lmbd,
 def run_tu_benchmark(
     dataset_names,
     kind,
-    mu_func_lambda,
     methods,
     max_graphs,
     max_nodes_per_graph,
@@ -353,26 +385,37 @@ def run_tu_benchmark(
     distribution_func="uniform",
     output_dir="results",
     save_grams=False,
+    request_edge_labels=False,
 ):
     """Run benchmark and save per‑dataset JSON immediately."""
     for di, dataset_name in enumerate(dataset_names):
         ds_seed = seed + di
         print(f"\n[{dataset_name}] Loading …")
+
+        # Default suffix: assume unlabeled; will be refined after load
+        label_suffix = "_labeled" if request_edge_labels else "_unlabeled"
+
         try:
-            graphs_all, y_all, _ = load_tu_dataset_unlabeled(dataset_name, root_dir=root_dir)
+            graphs_all, y_all, _, edge_labels_used = load_tu_dataset(
+                dataset_name, root_dir=root_dir,
+                force_download=False,
+                load_edge_labels=request_edge_labels,
+            )
+            # Refine suffix with actual edge label availability
+            label_suffix = "_labeled" if (request_edge_labels and edge_labels_used) else "_unlabeled"
         except Exception as e:
             print(f"[{dataset_name}] SKIP: could not load ({e})")
-            # Save a skip entry
             row = {
                 "dataset": dataset_name,
                 "n_total": 0,
                 "n_used": 0,
                 "error": str(e),
                 "methods": {},
+                "edge_labels_used": False,
             }
             ds_out = os.path.join(output_dir, dataset_name)
             os.makedirs(ds_out, exist_ok=True)
-            with open(os.path.join(ds_out, f"seed={ds_seed}_{distribution_func}.json"), "w") as f:
+            with open(os.path.join(ds_out, f"seed={ds_seed}_{kind}_{distribution_func}{label_suffix}.json"), "w") as f:
                 json.dump(row, f, indent=2, default=str)
             continue
 
@@ -393,19 +436,24 @@ def run_tu_benchmark(
                 "n_used": 0,
                 "error": str(e),
                 "methods": {},
+                "edge_labels_used": edge_labels_used,
             }
             ds_out = os.path.join(output_dir, dataset_name)
             os.makedirs(ds_out, exist_ok=True)
-            with open(os.path.join(ds_out, f"seed={ds_seed}_{distribution_func}.json"), "w") as f:
+            with open(os.path.join(ds_out, f"seed={ds_seed}_{kind}_{distribution_func}{label_suffix}.json"), "w") as f:
                 json.dump(row, f, indent=2, default=str)
             continue
 
         print(f"[{dataset_name}] Using {len(graphs)}/{n_total} graphs")
-        Ps, vs, ws = build_unlabeled_rw_inputs(graphs, distribution_func)
+        use_labeled = request_edge_labels and edge_labels_used
+        if request_edge_labels and not edge_labels_used:
+            print("  [info] Edge labels not available, running unlabeled kernels only.")
 
-        max_n = max(P.shape[0] for P in Ps) if Ps else 0
+        Ps, vs, ws = build_rw_inputs(graphs, distribution_func, labeled=use_labeled)
 
-        # Drop methods that are too heavy for large graphs
+        max_n = max(g.number_of_nodes() for g in graphs) if graphs else 0
+
+        # Drop methods too heavy for large graphs
         effective_methods = list(methods)
         if "direct" in effective_methods and max_n > 128:
             print("  [info] skipping direct (max node > 128)")
@@ -419,6 +467,7 @@ def run_tu_benchmark(
             "n_total": int(n_total),
             "n_used": int(len(graphs)),
             "max_n": int(max_n),
+            "edge_labels_used": use_labeled,
             "methods": {},
         }
 
@@ -432,17 +481,29 @@ def run_tu_benchmark(
                     "svm_time_sec": None,
                     "selected_c_mean": None,
                     "selected_c_mode": None,
+                    "rel_error": None,
                     "error": "skipped (graph too large for this method)",
                 }
 
+        # Compute lambda and mu_func
+        try:
+            d_max = max(max(d for _, d in G.degree()) for G in graphs)
+            lmbd = 1 / (d_max ** 2)
+            mu_func = utils.mu_func_gen(kind, lmbd=lmbd)
+        except Exception as e:
+            row["error"] = f"Degree/lambda computation failed: {e}"
+            ds_out = os.path.join(output_dir, dataset_name)
+            os.makedirs(ds_out, exist_ok=True)
+            with open(os.path.join(ds_out, f"seed={ds_seed}_{kind}_{distribution_func}{label_suffix}.json"), "w") as f:
+                json.dump(row, f, indent=2, default=str)
+            continue
+
+        # ---------- Compute Gram matrices and timings ----------
+        gram_matrices = {}
+        timing = {}
         for mi, method in enumerate(effective_methods):
             method_seed = ds_seed + 100 * (mi + 1)
             try:
-                # Compute lambda from max degree
-                d_max = max(max(d for _, d in G.degree()) for G in graphs)
-                lmbd = 1 / (d_max ** 2)
-                mu_func = utils.mu_func_gen(kind, lmbd=lmbd)
-
                 print(f"  Computing {method} kernel …")
                 t0 = time.perf_counter()
                 K = compute_kernel_matrix(
@@ -453,49 +514,13 @@ def run_tu_benchmark(
                     n_samples_mc=n_samples_mc,
                     n_samples_gvoys=n_samples_gvoys,
                     seed=method_seed,
-                    labeled=False,
+                    labeled=use_labeled,
                 )
-                gram_time = time.perf_counter() - t0
-
-                if normalize_kernel:
-                    K = normalize_gram_matrix(K)
-
                 t1 = time.perf_counter()
-                stats = evaluate_svm_precomputed(
-                    K, y,
-                    c_values=c_values,
-                    n_splits=n_splits,
-                    n_repeats=n_repeats,
-                    inner_splits=inner_splits,
-                    seed=ds_seed,
-                )
-                svm_time = time.perf_counter() - t1
-
-                row["methods"][method] = {
-                    "mean_accuracy": stats["mean_accuracy"],
-                    "std_accuracy": stats["std_accuracy"],
-                    "gram_time_sec": float(gram_time),
-                    "svm_time_sec": float(svm_time),
-                    "selected_c_mean": stats["selected_c_mean"],
-                    "selected_c_mode": stats["selected_c_mode"],
-                    "error": None,
-                }
-
-                print(f"    acc = {100.0*stats['mean_accuracy']:.2f}% "
-                      f"± {100.0*stats['std_accuracy']:.2f}% "
-                      f"(C_mode={stats['selected_c_mode']:.3g}) "
-                      f"gram {gram_time:.2f}s, svm {svm_time:.2f}s")
-
-                if save_grams:
-                    gram_file = os.path.join(
-                        output_dir, dataset_name,
-                        f"{method}_seed={method_seed}.pickle"
-                    )
-                    os.makedirs(os.path.dirname(gram_file), exist_ok=True)
-                    with open(gram_file, "wb") as f:
-                        pickle.dump(K, f)
-
+                gram_matrices[method] = K
+                timing[method] = t1 - t0
             except Exception as e:
+                print(f"  {method}: FAILED → {e}")
                 row["methods"][method] = {
                     "mean_accuracy": None,
                     "std_accuracy": None,
@@ -503,17 +528,97 @@ def run_tu_benchmark(
                     "svm_time_sec": None,
                     "selected_c_mean": None,
                     "selected_c_mode": None,
+                    "rel_error": None,
                     "error": str(e),
                 }
-                print(f"  {method}: FAILED → {e}")
 
-        # Save per‑dataset JSON
+        # Determine reference matrix (direct > cg)
+        reference_matrix = None
+        reference_method = None
+        if "direct" in gram_matrices:
+            reference_matrix = gram_matrices["direct"]
+            reference_method = "direct"
+        elif "cg" in gram_matrices:
+            reference_matrix = gram_matrices["cg"]
+            reference_method = "cg"
+
+        if reference_matrix is None:
+            print("  [warning] No reference matrix (direct or CG) available. Errors will not be computed.")
+
+        # Evaluate SVM and compute errors for all methods that succeeded
+        for method, K in gram_matrices.items():
+            # Compute error relative to reference (if reference exists)
+            if reference_matrix is not None:
+                if method == reference_method:
+                    err_dict = {"mean_abs": 0.0, "mean_rel": 0.0, "max_abs": 0.0, "max_rel": 0.0}
+                else:
+                    err_dict = gram.matrix_errors(reference_matrix, K)
+            else:
+                err_dict = None
+
+            # Normalize if needed and evaluate SVM
+            try:
+                K_norm = normalize_gram_matrix(K) if normalize_kernel else K
+                t0 = time.perf_counter()
+                stats = evaluate_svm_precomputed(
+                    K_norm, y,
+                    c_values=c_values,
+                    n_splits=n_splits,
+                    n_repeats=n_repeats,
+                    inner_splits=inner_splits,
+                    seed=ds_seed,
+                )
+                svm_time = time.perf_counter() - t0
+
+                row["methods"][method] = {
+                    "mean_accuracy": stats["mean_accuracy"],
+                    "std_accuracy": stats["std_accuracy"],
+                    "gram_time_sec": float(timing[method]),
+                    "svm_time_sec": float(svm_time),
+                    "selected_c_mean": stats["selected_c_mean"],
+                    "selected_c_mode": stats["selected_c_mode"],
+                    "rel_error": err_dict,
+                    "error": None,
+                }
+
+                print(f"    acc = {100.0*stats['mean_accuracy']:.2f}% "
+                      f"± {100.0*stats['std_accuracy']:.2f}% "
+                      f"(C_mode={stats['selected_c_mode']:.3g}) "
+                      f"gram {timing[method]:.2f}s, svm {svm_time:.2f}s")
+                if err_dict is not None:
+                    print(f"    rel_error: mean_abs={err_dict['mean_abs']:.2e} mean_rel={err_dict['mean_rel']:.2e}")
+
+                if save_grams:
+                    gram_file = os.path.join(
+                        output_dir, dataset_name,
+                        f"{method}_seed={ds_seed + 100 * (list(effective_methods).index(method) + 1)}.pickle"
+                    )
+                    os.makedirs(os.path.dirname(gram_file), exist_ok=True)
+                    with open(gram_file, "wb") as f:
+                        pickle.dump(K_norm if normalize_kernel else K, f)
+
+            except Exception as e:
+                row["methods"][method] = {
+                    "mean_accuracy": None,
+                    "std_accuracy": None,
+                    "gram_time_sec": float(timing[method]),
+                    "svm_time_sec": None,
+                    "selected_c_mean": None,
+                    "selected_c_mode": None,
+                    "rel_error": err_dict,
+                    "error": f"SVM evaluation failed: {e}",
+                }
+                print(f"  {method}: SVM evaluation FAILED → {e}")
+
+        # Save per‑dataset JSON (with kernel kind in filename)
         ds_out = os.path.join(output_dir, dataset_name)
         os.makedirs(ds_out, exist_ok=True)
-        ds_file = os.path.join(ds_out, f"seed={ds_seed}_{distribution_func}.json")
+        ds_file = os.path.join(ds_out, f"seed={ds_seed}_{kind}_{distribution_func}{label_suffix}.json")
         with open(ds_file, "w") as f:
             json.dump(row, f, indent=2, default=str)
         print(f"  → saved {ds_file}")
+
+
 
 # ----------------------------------------------------------------------
 #  CLI
@@ -559,8 +664,10 @@ def parse_args():
                         help="Folder for results")
     parser.add_argument("--save_grams", action="store_true",
                         help="Save Gram matrices as pickle files")
+    parser.add_argument("--labeled", type=int, default=0, choices=[0, 1],
+                    help="Request edge‑labeled kernels: 1 = yes, 0 = no (default: 0)")
     parser.add_argument("--experiment_name", type=str, default=None,
-                        help="Optional suffix for the output file")
+                        help="Optional suffix for the output file (currently unused)")
     return parser.parse_args()
 
 
@@ -576,7 +683,8 @@ if __name__ == "__main__":
         print("Note: CG, Sylvester, fixed_point require geom kernel – removed.")
 
     normalize_kernel = not args.no_normalize
-    P_HALT = 0.2
+    global P_HALT
+    P_HALT = 0.2   # must be defined globally for compute_kernel_matrix
 
     print("Benchmark configuration:")
     print(f"  datasets: {args.datasets}")
@@ -587,13 +695,13 @@ if __name__ == "__main__":
     print(f"  n_samples_mc: {args.n_samples_mc}")
     print(f"  n_samples_gvoys: {args.n_samples_gvoys}")
     print(f"  normalize: {normalize_kernel}")
+    print(f"  request_edge_labels: {args.labeled}")
     print(f"  u_w_distribution: {args.u_w_distribution}")
     print(f"  output: {args.output_dir}")
 
     run_tu_benchmark(
         dataset_names=args.datasets,
         kind=args.kind,
-        mu_func_lambda=None,
         methods=args.methods,
         max_graphs=args.max_graphs,
         max_nodes_per_graph=args.max_nodes_per_graph,
@@ -609,35 +717,5 @@ if __name__ == "__main__":
         distribution_func=args.u_w_distribution,
         output_dir=args.output_dir,
         save_grams=args.save_grams,
+        request_edge_labels=bool(args.labeled),
     )
-
-    # # Compose output filename
-    # fname_parts = [f"tu_{args.kind}_{args.u_w_distribution}"]
-    # if args.experiment_name:
-    #     fname_parts.append(args.experiment_name)
-    # fname_parts.append(f"seed{args.seed}")
-    # out_file = os.path.join(args.output_dir, "_".join(fname_parts) + ".json")
-
-    # with open(out_file, "w") as f:
-    #     json.dump(results, f, indent=2, default=str)
-
-    # print(f"\nAll results saved to {out_file}")
-
-    # # Print a quick summary
-    # print("\nSummary:")
-    # for row in results:
-    #     print(f"{row['dataset']}: {row['n_used']}/{row['n_total']} graphs")
-    #     if row.get("error"):
-    #         print(f"  SKIP: {row['error']}")
-    #         continue
-    #     for m in args.methods:
-    #         info = row["methods"].get(m)
-    #         if info is None:
-    #             print(f"  {m}: no result")
-    #         elif info.get("error"):
-    #             print(f"  {m}: error ({info['error']})")
-    #         else:
-    #             print(f"  {m}: acc={100.0*info['mean_accuracy']:.2f}% "
-    #                   f"± {100.0*info['std_accuracy']:.2f}% "
-    #                   f"(gram {info['gram_time_sec']:.2f}s, "
-    #                   f"svm {info['svm_time_sec']:.2f}s)")

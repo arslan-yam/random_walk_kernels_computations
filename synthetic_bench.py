@@ -59,7 +59,7 @@ def bench(dataset,
     if n <= 512:
         compute_sylvester=True
     else:
-        compute_sylvester=True
+        compute_sylvester=False
 
     if n <= 1024:
         compute_normal_gvoys=True
