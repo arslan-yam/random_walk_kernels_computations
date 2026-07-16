@@ -9,8 +9,8 @@ import scipy.linalg as la
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import KFold
 
-from . import utils
-from .kernel_kmeans import (
+from src import utils
+from kernel_kmeans import (
     METHODS,
     TU_DATASETS,
     build_inputs,
@@ -120,7 +120,7 @@ def parse_args():
     parser.add_argument("--n-splits", type=int, default=5)
     parser.add_argument("--alpha", type=float, default=1e-6)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="graph_gp_results.json")
+    parser.add_argument("--output", default="./results/graph_gp/results.json")
     return parser.parse_args()
 
 

@@ -7,7 +7,7 @@ import time
 import numpy as np
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
-from . import gram, mcrwk, utils
+from src import gram, mcrwk, utils
 
 
 TU_DATASETS = ["MUTAG", "ENZYMES", "NCI1", "PTC_MR", "DD", "PROTEINS", "AIDS"]
@@ -47,7 +47,7 @@ def compute_gram(method, Ps, vs, ws, mu_func, lmbd, n_samples, seed):
     if method == "sylv":
         return gram.gram_sylvester(Ps, vs, ws, mu_func)
     if method == "gvoys":
-        from . import gvoys
+        from src import gvoys
 
         np.random.seed(seed)
         return gvoys.random_walk_kernel_gvoys_dataset(
@@ -151,7 +151,7 @@ def parse_args():
     parser.add_argument("--n-samples", type=int, default=1000)
     parser.add_argument("--lmbd", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="kernel_kmeans_results.json")
+    parser.add_argument("--output", default="./results/kernel_kmeans/results.json")
     return parser.parse_args()
 
 
