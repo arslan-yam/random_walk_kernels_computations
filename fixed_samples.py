@@ -76,8 +76,7 @@ def run_experiment(
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--node-sizes", nargs="+", type=int, default=[8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192])
-    parser.add_argument("--node-sizes", nargs="+", type=int, default=[8, 16, 32, 64, 128])
+    parser.add_argument("--node-sizes", nargs="+", type=int, default=[8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192])
     parser.add_argument("--n-samples", type=int, default=1000)
     parser.add_argument("--n-pairs", type=int, default=3)
     parser.add_argument("--lmbd", type=float, default=0.01)
