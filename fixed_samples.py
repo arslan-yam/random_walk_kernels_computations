@@ -3,6 +3,7 @@
 import argparse
 import json
 import time
+import os
 
 import numpy as np
 
@@ -76,7 +77,8 @@ def run_experiment(
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--node-sizes", nargs="+", type=int, default=[8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192])
+    # parser.add_argument("--node-sizes", nargs="+", type=int, default=[8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192])
+    parser.add_argument("--node-sizes", nargs="+", type=int, default=[8, 16])
     parser.add_argument("--n-samples", type=int, default=1000)
     parser.add_argument("--n-pairs", type=int, default=3)
     parser.add_argument("--lmbd", type=float, default=0.01)
@@ -96,5 +98,6 @@ if __name__ == "__main__":
         graph_kind=args.graph_kind,
         seed=args.seed,
     )
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

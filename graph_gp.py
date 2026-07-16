@@ -3,6 +3,7 @@
 import argparse
 import json
 import time
+import os
 
 import numpy as np
 import scipy.linalg as la
@@ -138,5 +139,6 @@ if __name__ == "__main__":
         alpha=args.alpha,
         seed=args.seed,
     )
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

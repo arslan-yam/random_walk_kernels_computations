@@ -3,6 +3,7 @@
 import argparse
 import json
 import time
+import os
 
 import numpy as np
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
@@ -167,5 +168,6 @@ if __name__ == "__main__":
         n_samples=args.n_samples,
         seed=args.seed,
     )
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
