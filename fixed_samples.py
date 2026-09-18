@@ -7,7 +7,7 @@ import os
 
 import numpy as np
 
-from src import mcrwk, rwk, utils
+from src import gram, mcrwk, utils
 
 
 def random_dist(n, seed):
@@ -43,9 +43,7 @@ def run_experiment(
             w1 = random_dist(n, curr_seed + 4)
             w2 = random_dist(n, curr_seed + 5)
 
-            exact = rwk.random_walk_kernel(
-                P1, P2, v1, v2, w1, w2, mu_func, kind="geom"
-            )
+            exact = gram.gram_series([P1,P2],[v1,v2],[w1,w2],mu_func,kind="geom",eps=1e-12/(n*n))[0,1]
 
             t0 = time.perf_counter()
             approx = mcrwk.random_walk_kernel_mc(
@@ -84,7 +82,7 @@ def parse_args():
     parser.add_argument("--lmbd", type=float, default=0.01)
     parser.add_argument("--graph-kind", choices=["er", "ba", "ws", "sbm"], default="er")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="./results/fixed_samples/results.json")
+    parser.add_argument("--output", default="./results_v2/fixed_samples/results.json")
     return parser.parse_args()
 
 
@@ -98,6 +96,6 @@ if __name__ == "__main__":
         graph_kind=args.graph_kind,
         seed=args.seed,
     )
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

@@ -32,7 +32,10 @@ def build_inputs(graphs, seed=42):
 
 
 def normalize_gram(K, eps=1e-12):
-    d = np.sqrt(np.clip(np.diag(K), eps, None))
+    """Normalize a positive diagonal; eps is retained only for API compatibility."""
+    if not np.isfinite(K).all() or np.any(np.diag(K) <= 0):
+        raise ValueError("normalization requires finite values and a positive diagonal")
+    d = np.sqrt(np.diag(K))
     return K / np.outer(d, d)
 
 
@@ -50,7 +53,6 @@ def compute_gram(method, Ps, vs, ws, mu_func, lmbd, n_samples, seed):
     if method == "gvoys":
         from src import gvoys
 
-        np.random.seed(seed)
         return gvoys.random_walk_kernel_gvoys_dataset(
             Ps,
             vs,
@@ -59,11 +61,14 @@ def compute_gram(method, Ps, vs, ws, mu_func, lmbd, n_samples, seed):
             lambda_coeff=lmbd,
             p_halt=gvoys.P_HALT,
             nb_random_walks=n_samples,
+            seed=seed,
         )
     raise ValueError(f"unknown method: {method}")
 
 
 def kernel_kmeans(K, n_clusters, max_iter=100, seed=42):
+    if not 1 <= n_clusters <= len(K):
+        raise ValueError("require 1 <= n_clusters <= number of graphs")
     rng = np.random.default_rng(seed)
     labels = rng.integers(n_clusters, size=len(K))
     labels[:n_clusters] = np.arange(n_clusters)
@@ -82,6 +87,14 @@ def kernel_kmeans(K, n_clusters, max_iter=100, seed=42):
                 )
 
         new_labels = distances.argmin(axis=1)
+        # Re-seed empty clusters with poorly represented points from non-singletons.
+        counts = np.bincount(new_labels, minlength=n_clusters)
+        for empty in np.flatnonzero(counts == 0):
+            candidates = np.flatnonzero(counts[new_labels] > 1)
+            chosen = candidates[np.argmax(distances[candidates, new_labels[candidates]])]
+            counts[new_labels[chosen]] -= 1
+            new_labels[chosen] = empty
+            counts[empty] += 1
         if np.array_equal(labels, new_labels):
             break
         labels = new_labels
@@ -152,7 +165,7 @@ def parse_args():
     parser.add_argument("--n-samples", type=int, default=1000)
     parser.add_argument("--lmbd", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="./results/kernel_kmeans/results.json")
+    parser.add_argument("--output", default="./results_v2/kernel_kmeans/results.json")
     return parser.parse_args()
 
 
@@ -168,6 +181,6 @@ if __name__ == "__main__":
         n_samples=args.n_samples,
         seed=args.seed,
     )
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

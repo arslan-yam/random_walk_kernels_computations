@@ -1,21 +1,23 @@
+"""Direct and iterative references for normalized random-walk kernels."""
+
 import numpy as np
 import scipy.linalg as la
 import scipy.sparse as sp
-from scipy.sparse.linalg import cg, LinearOperator, spsolve, expm as sparse_expm
+from scipy.sparse.linalg import cg, gmres, LinearOperator, spsolve, expm_multiply
+from .normalization import symmetric_inputs
+from ._validation import kernel_parameter, positive_int
 
 
 def random_walk_kernel(P1, P2, v1, v2, w1, w2, mu_func, kind="general", max_iter=30):
     P1 = sp.csr_matrix(P1)
     P2 = sp.csr_matrix(P2)
-    n1, n2 = len(v1), len(v2)
     W = sp.kron(P1, P2, format="csr")
     v = np.kron(v1, v2)
     w = np.kron(w1, w2)
 
     if kind == "exp":
         lmbd = mu_func(1)
-        S = sparse_expm(lmbd * W)
-        return float(v @ (S @ w))
+        return float(v @ expm_multiply(lmbd * W, w))
 
     if kind == "geom":
         lmbd = mu_func(1)
@@ -45,8 +47,7 @@ def random_walk_kernel_labeled(P1_labeled, P2_labeled, v1, v2, w1, w2, mu_func, 
 
     if kind == "exp":
         lmbd = mu_func(1)
-        S = sparse_expm(lmbd * W)
-        return float(v @ (S @ w))
+        return float(v @ expm_multiply(lmbd * W, w))
 
     if kind == "geom":
         lmbd = mu_func(1)
@@ -86,98 +87,84 @@ def random_walk_kernel_sylvester(P1, P2, v1, v2, w1, w2, mu_func):
                 accum += Y[:, k] * T1[k, j]
             rhs += lmbd * (T2 @ accum)
         A = np.eye(n2, dtype=complex) - lmbd * T1[j, j] * T2
-        Y[:, j] = np.linalg.solve(A, rhs)
+        Y[:, j] = la.solve_triangular(A, rhs, lower=False)
 
     M = U2 @ Y @ U1.conj().T
     val = np.sum(V0 * M)
 
     return float(np.real_if_close(val))
 
-# --- Fixed Point ---
-def random_walk_kernel_fixed_point(P1, P2, v1, v2, w1, w2, mu_func, eps=1e-30, max_iter=1000):
-    P1 = sp.csr_matrix(P1)
-    P2 = sp.csr_matrix(P2)
+def _operator(P1, P2, n1, n2, lam, labeled):
+    pairs = [(P1[l], P2[l]) for l in sorted(set(P1) & set(P2))] if labeled else [(P1,P2)]
+    pairs = [(sp.csr_matrix(a).T.tocsr(), sp.csr_matrix(b)) for a,b in pairs]
 
-    lmbd = mu_func(1)
-    w0 = np.outer(w2, w1)
-    v0 = np.outer(v2, v1)
-    x = w0.copy()
-
-    P1t = P1.transpose().tocsr()
-
-    for _ in range(max_iter):
-        x_new = w0 + lmbd * (P2 @ x @ P1t)
-        if np.linalg.norm(x_new - x, ord="fro") <= eps:
-            x = x_new
-            break
-        x = x_new
-
-    return float(np.sum(v0 * x))
-
-def random_walk_kernel_fixed_point_labeled(P1_labeled, P2_labeled, v1, v2, w1, w2, mu_func, eps=1e-30, max_iter=1000):
-    common_labels = set(P1_labeled.keys()) & set(P2_labeled.keys())
-    w0 = np.outer(w2, w1)
-    v0 = np.outer(v2, v1)
-    x = w0.copy()
-    lmbd = mu_func(1)
-
-    P1t = {label: sp.csr_matrix(P1_labeled[label]).transpose().tocsr() for label in common_labels}
-    P2s = {label: sp.csr_matrix(P2_labeled[label]) for label in common_labels}
-
-    for _ in range(max_iter):
-        x_new = w0.copy()
-        for label in common_labels:
-            x_new += lmbd * (P2s[label] @ x @ P1t[label])
-
-        if np.linalg.norm(x_new - x, ord="fro") <= eps:
-            x = x_new
-            break
-
-        x = x_new
-
-    return float(np.sum(v0 * x))
-
-# --- Conjugate Gradient ---
-def random_walk_kernel_cg(P1, P2, v1, v2, w1, w2, mu_func, eps=1e-30, max_iter=1000):
-    P1 = sp.csr_matrix(P1)
-    P2 = sp.csr_matrix(P2)
-
-    n1, n2 = P1.shape[0], P2.shape[0]
-    v = np.kron(v1, v2)
-    w = np.kron(w1, w2)
-    lmbd = mu_func(1)
-    P1t = P1.transpose().tocsr()
-
-    def matvec(x):
-        X = x.reshape((n2, n1), order="F")
-        Y = X - lmbd * (P2 @ X @ P1t)
+    def product(x):
+        X = x.reshape((n2,n1), order="F")
+        Y = np.zeros_like(X)
+        for a_transposed,b in pairs:
+            Y += b @ X @ a_transposed
         return Y.reshape(-1, order="F")
 
-    A = LinearOperator(shape=(n1 * n2, n1 * n2), matvec=matvec, dtype=float)
-    x, info = cg(A, w, rtol=eps, maxiter=max_iter)
-    if info != 0:
-        raise RuntimeError(f"CG did not converge, info={info}")
-    return float(v @ x)
+    A = LinearOperator((n1*n2,n1*n2), matvec=lambda x: x-lam*product(x), dtype=float)
+    return A, product
 
-def random_walk_kernel_cg_labeled(P1_labeled, P2_labeled, v1, v2, w1, w2, mu_func, eps=1e-30, max_iter=1000):
-    common_labels = set(P1_labeled.keys()) & set(P2_labeled.keys())
-    n1, n2 = len(v1), len(v2)
-    v = np.kron(v1, v2)
-    w = np.kron(w1, w2)
-    lmbd = mu_func(1)
 
-    P1t = {label: sp.csr_matrix(P1_labeled[label]).transpose().tocsr() for label in common_labels}
-    P2s = {label: sp.csr_matrix(P2_labeled[label]) for label in common_labels}
+def _solve(P1,P2,v1,v2,w1,w2,mu_func,eps,max_iter,labeled,solver):
+    """CG uses similarity-transformed symmetric inputs; GMRES uses P directly."""
+    lam = kernel_parameter("geom", mu_func)
+    positive_int(max_iter, "max_iter")
+    if not np.isfinite(eps) or not 0 < eps < 1:
+        raise ValueError("solver tolerance must be finite and between 0 and 1")
+    if solver == "cg":
+        P1,v1,w1 = symmetric_inputs(P1,v1,w1,labeled)
+        P2,v2,w2 = symmetric_inputs(P2,v2,w2,labeled)
+    n1,n2 = len(v1),len(v2)
+    v,w = np.kron(v1,v2),np.kron(w1,w2)
+    A,_ = _operator(P1,P2,n1,n2,lam,labeled)
+    if not np.any(w):
+        return 0.0
+    if solver == "fixed_point":
+        x = w.copy()
+        for _ in range(max_iter):
+            delta = w-A@x
+            if np.linalg.norm(delta) <= eps*np.linalg.norm(w):
+                break
+            x += delta
+        else:
+            raise RuntimeError(f"FPI did not converge after {max_iter} iterations")
+    elif solver == "cg":
+        x,info = cg(A,w,rtol=eps,atol=0,maxiter=max_iter)
+        if info:
+            raise RuntimeError(f"symmetric CG did not converge, info={info}; try GMRES/FPI or more iterations")
+    elif solver == "gmres":
+        # callback_type='legacy' makes maxiter count inner iterations, not restarts.
+        x,info = gmres(A,w,rtol=eps,atol=0,maxiter=max_iter,
+                      callback=lambda _: None,callback_type="legacy")
+        if info:
+            raise RuntimeError(f"GMRES did not converge, info={info}")
+    else:
+        raise ValueError("unknown iterative solver")
+    residual = np.linalg.norm(w-A@x)/np.linalg.norm(w)
+    if not np.isfinite(residual) or residual > max(10*eps,1e-13):
+        raise RuntimeError(f"true relative residual {residual:.3g} exceeds tolerance {eps:.3g}")
+    return float(v@x)
 
-    def matvec(x):
-        X = x.reshape((n2, n1), order="F")
-        Y = X.copy()
-        for label in common_labels:
-            Y -= lmbd * (P2s[label] @ X @ P1t[label])
-        return Y.reshape(-1, order="F")
 
-    operator = LinearOperator(shape=(n1 * n2, n1 * n2), matvec=matvec, dtype=float)
-    x, info = cg(operator, w, rtol=eps, maxiter=max_iter)
-    if info != 0:
-        raise RuntimeError(f"CG did not converge, info={info}")
-    return float(v @ x)
+def random_walk_kernel_fixed_point(P1,P2,v1,v2,w1,w2,mu_func,eps=1e-10,max_iter=1000):
+    return _solve(P1,P2,v1,v2,w1,w2,mu_func,eps,max_iter,False,"fixed_point")
+
+
+def random_walk_kernel_fixed_point_labeled(P1,P2,v1,v2,w1,w2,mu_func,eps=1e-10,max_iter=1000):
+    return _solve(P1,P2,v1,v2,w1,w2,mu_func,eps,max_iter,True,"fixed_point")
+
+
+def random_walk_kernel_cg(P1,P2,v1,v2,w1,w2,mu_func,eps=1e-10,max_iter=1000):
+    return _solve(P1,P2,v1,v2,w1,w2,mu_func,eps,max_iter,False,"cg")
+
+
+def random_walk_kernel_cg_labeled(P1,P2,v1,v2,w1,w2,mu_func,eps=1e-10,max_iter=1000):
+    return _solve(P1,P2,v1,v2,w1,w2,mu_func,eps,max_iter,True,"cg")
+
+
+def random_walk_kernel_gmres(P1,P2,v1,v2,w1,w2,mu_func,eps=1e-10,max_iter=1000,labeled=False):
+    return _solve(P1,P2,v1,v2,w1,w2,mu_func,eps,max_iter,labeled,"gmres")

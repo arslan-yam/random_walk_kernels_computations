@@ -211,4 +211,7 @@ __marimo__/
 tu_datasets
 .conda
 results
+results_v2/
 .DS_Store
+analysis
+examples

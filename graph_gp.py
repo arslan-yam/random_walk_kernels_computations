@@ -21,12 +21,14 @@ from kernel_kmeans import (
 
 
 def gp_predict(K_train, y_train, K_test, alpha=1e-6):
+    if not np.isfinite(alpha) or alpha < 0:
+        raise ValueError("alpha must be finite and nonnegative")
     y_mean = y_train.mean()
-    weights = la.solve(
-        K_train + alpha * np.eye(len(K_train)),
-        y_train - y_mean,
-        assume_a="sym",
-    )
+    try:
+        factor = la.cho_factor(K_train + alpha * np.eye(len(K_train)))
+    except la.LinAlgError as exc:
+        raise ValueError("GP covariance is not positive definite; choose an explicit regularization policy") from exc
+    weights = la.cho_solve(factor, y_train - y_mean)
     return y_mean + K_test @ weights
 
 
@@ -82,8 +84,10 @@ def run_experiment(
                 "dataset": name,
                 "method": method,
                 "best_lambda": best["lambda"],
-                "RMSE": best["RMSE"],
-                "MAE": best["MAE"],
+                "selection_cv_RMSE": best["RMSE"],
+                "selection_cv_MAE": best["MAE"],
+                "candidates": candidates,
+                "evaluation_note": "Selection CV only, not a held-out regression estimate; CLI TU targets are class codes.",
                 "optimization_time_sec": total_time,
             }
             results.append(row)
@@ -121,7 +125,7 @@ def parse_args():
     parser.add_argument("--n-splits", type=int, default=5)
     parser.add_argument("--alpha", type=float, default=1e-6)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="./results/graph_gp/results.json")
+    parser.add_argument("--output", default="./results_v2/graph_gp/results.json")
     return parser.parse_args()
 
 
@@ -139,6 +143,6 @@ if __name__ == "__main__":
         alpha=args.alpha,
         seed=args.seed,
     )
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
