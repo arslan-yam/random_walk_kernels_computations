@@ -125,7 +125,7 @@ def parse_args():
     parser.add_argument("--n-splits", type=int, default=5)
     parser.add_argument("--alpha", type=float, default=1e-6)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="./results_v2/graph_gp/results.json")
+    parser.add_argument("--output", default="./results/graph_gp/results.json")
     return parser.parse_args()
 
 

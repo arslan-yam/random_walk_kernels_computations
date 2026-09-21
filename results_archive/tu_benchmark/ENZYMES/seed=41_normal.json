@@ -1,0 +1,53 @@
+{
+  "dataset": "ENZYMES",
+  "n_total": 600,
+  "n_used": 600,
+  "max_n": 126,
+  "methods": {
+    "direct": {
+      "mean_accuracy": 0.14833333333333332,
+      "std_accuracy": 0.012247448713915886,
+      "gram_time_sec": 2373.6387264123186,
+      "svm_time_sec": 0.44342408422380686,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "cg": {
+      "mean_accuracy": 0.14833333333333332,
+      "std_accuracy": 0.012247448713915886,
+      "gram_time_sec": 246.70368458889425,
+      "svm_time_sec": 0.4432512056082487,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "fixed_point": {
+      "mean_accuracy": 0.14833333333333332,
+      "std_accuracy": 0.012247448713915886,
+      "gram_time_sec": 153.2930348776281,
+      "svm_time_sec": 0.46041861455887556,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.18000000000000002,
+      "std_accuracy": 0.019436506316151007,
+      "gram_time_sec": 181.5385792721063,
+      "svm_time_sec": 0.43613325525075197,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.15,
+      "std_accuracy": 0.03456073558887954,
+      "gram_time_sec": 3.102227353490889,
+      "svm_time_sec": 0.6609867969527841,
+      "selected_c_mean": 60.00039999999999,
+      "selected_c_mode": 100.0,
+      "error": null
+    }
+  }
+}

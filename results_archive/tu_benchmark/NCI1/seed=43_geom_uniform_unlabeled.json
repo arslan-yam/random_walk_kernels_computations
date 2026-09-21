@@ -1,0 +1,84 @@
+{
+  "dataset": "NCI1",
+  "n_total": 4110,
+  "n_used": 4110,
+  "max_n": 111,
+  "edge_labels_used": false,
+  "methods": {
+    "direct": {
+      "mean_accuracy": 0.5004866180048662,
+      "std_accuracy": 0.0005959829057866878,
+      "gram_time_sec": 33741.31699025631,
+      "svm_time_sec": 7.7050233371555805,
+      "selected_c_mean": 20.0026,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 0.0,
+        "mean_rel": 0.0,
+        "max_abs": 0.0,
+        "max_rel": 0.0
+      },
+      "error": null
+    },
+    "cg": {
+      "mean_accuracy": 0.5004866180048662,
+      "std_accuracy": 0.0005959829057866878,
+      "gram_time_sec": 3413.2249694652855,
+      "svm_time_sec": 7.301266923546791,
+      "selected_c_mean": 22.0006,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 2.1920963039382385e-19,
+        "mean_rel": 1.3899243459323267e-16,
+        "max_abs": 1.3877787807814457e-17,
+        "max_rel": 9.509300085645103e-15
+      },
+      "error": null
+    },
+    "fixed_point": {
+      "mean_accuracy": 0.5004866180048662,
+      "std_accuracy": 0.0005959829057866878,
+      "gram_time_sec": 8519.43932840228,
+      "svm_time_sec": 7.294275168329477,
+      "selected_c_mean": 0.022600000000000002,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 3.673965916013085e-19,
+        "mean_rel": 2.919996098315852e-16,
+        "max_abs": 1.3877787807814457e-17,
+        "max_rel": 9.236119254661491e-15
+      },
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.5221411192214112,
+      "std_accuracy": 0.010073110240625011,
+      "gram_time_sec": 2380.93851159513,
+      "svm_time_sec": 8.954076867550611,
+      "selected_c_mean": 100.0,
+      "selected_c_mode": 100.0,
+      "rel_error": {
+        "mean_abs": 1.4305242659666811e-05,
+        "mean_rel": 0.00770765748111866,
+        "max_abs": 0.010339951624099383,
+        "max_rel": 0.10414199864475504
+      },
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.5004866180048662,
+      "std_accuracy": 0.0005959829057866878,
+      "gram_time_sec": 57.45593613013625,
+      "svm_time_sec": 7.293578777462244,
+      "selected_c_mean": 0.040600000000000004,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 3.876883369479878e-19,
+        "mean_rel": 2.9868919209281364e-16,
+        "max_abs": 4.163336342344337e-17,
+        "max_rel": 9.392663648808296e-15
+      },
+      "error": null
+    }
+  }
+}

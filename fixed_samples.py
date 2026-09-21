@@ -82,7 +82,7 @@ def parse_args():
     parser.add_argument("--lmbd", type=float, default=0.01)
     parser.add_argument("--graph-kind", choices=["er", "ba", "ws", "sbm"], default="er")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="./results_v2/fixed_samples/results.json")
+    parser.add_argument("--output", default="./results/fixed_samples/results.json")
     return parser.parse_args()
 
 

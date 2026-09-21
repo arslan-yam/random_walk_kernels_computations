@@ -1,0 +1,53 @@
+{
+  "dataset": "PTC_MR",
+  "n_total": 344,
+  "n_used": 344,
+  "max_n": 64,
+  "methods": {
+    "direct": {
+      "mean_accuracy": 0.5581415174765558,
+      "std_accuracy": 0.006490320992557279,
+      "gram_time_sec": 65.06743731722236,
+      "svm_time_sec": 0.21251942589879036,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "cg": {
+      "mean_accuracy": null,
+      "std_accuracy": null,
+      "gram_time_sec": null,
+      "svm_time_sec": null,
+      "selected_c_mean": null,
+      "selected_c_mode": null,
+      "error": "CG did not converge, info=5000"
+    },
+    "fixed_point": {
+      "mean_accuracy": 0.5581415174765558,
+      "std_accuracy": 0.006490320992557279,
+      "gram_time_sec": 52.61334306746721,
+      "svm_time_sec": 0.211220134049654,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.5581415174765558,
+      "std_accuracy": 0.006490320992557279,
+      "gram_time_sec": 32.58155442774296,
+      "svm_time_sec": 0.20940478891134262,
+      "selected_c_mean": 20.000800000000005,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.5581415174765558,
+      "std_accuracy": 0.006490320992557279,
+      "gram_time_sec": 1.5218326710164547,
+      "svm_time_sec": 0.2546563930809498,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    }
+  }
+}

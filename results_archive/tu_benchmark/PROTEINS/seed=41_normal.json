@@ -1,0 +1,53 @@
+{
+  "dataset": "PROTEINS",
+  "n_total": 1113,
+  "n_used": 1113,
+  "max_n": 620,
+  "methods": {
+    "direct": {
+      "mean_accuracy": null,
+      "std_accuracy": null,
+      "gram_time_sec": null,
+      "svm_time_sec": null,
+      "selected_c_mean": null,
+      "selected_c_mode": null,
+      "error": "skipped (graph too large for this method)"
+    },
+    "cg": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 786.5581506639719,
+      "svm_time_sec": 0.8955411612987518,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "fixed_point": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 448.5576357729733,
+      "svm_time_sec": 0.9516348280012608,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 698.0956124104559,
+      "svm_time_sec": 0.7474907450377941,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 10.126496519893408,
+      "svm_time_sec": 1.7536379396915436,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    }
+  }
+}

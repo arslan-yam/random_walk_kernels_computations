@@ -62,7 +62,7 @@ class KernelConfig:
     def metadata(self):
         return {**asdict(self), "effective_labeled_lengths":self.lengths,
                 "effective_labeled_features":self.lengths*self.n_label_samples_per_length,
-                "mc_replicas":2,"gvoys_replicas":2,"gvoys_sides_per_replica":2}
+                "mc_replicas":2,"gvoys_replicas":1,"gvoys_sides_per_replica":2}
 
 
 def compute_kernel(method, Ps,vs,ws,config,seed=42,labeled=False):
@@ -108,7 +108,7 @@ def add_kernel_arguments(parser,default_mc=200):
     option(parser,"lmbd",type=float,default=0.1,help="Kernel lambda; default 0.1. Use --lambda-mode degree for the old rule.")
     option(parser,"lambda_mode",choices=["fixed","degree"],default="fixed")
     option(parser,"n_samples_mc",type=int,default=default_mc,help="Shared MC feature budget before optional per-node scaling; each feature uses two replicas.")
-    option(parser,"n_samples_gvoys",type=int,default=200,help="GVoys outer features per start vertex; two replicas and two sides each.")
+    option(parser,"n_samples_gvoys",type=int,default=200,help="GVoys outer features per start vertex; one realization with left/right walks.")
     option(parser,"n_length_samples",type=int,help="Explicit labeled length count; overrides MC feature-budget derivation.")
     option(parser,"n_label_samples_per_length",type=int,default=1)
     option(parser,"n_walk_reps",type=int,default=1,help="Walks averaged inside EACH labeled replica.")
@@ -216,5 +216,7 @@ def runtime_metadata():
             "python":sys.version,"numpy":np.__version__,"scipy":scipy.__version__,
             "networkx":nx.__version__,"scikit_learn":version("scikit-learn"),
             "platform":platform.platform(),"source_sha256":digest.hexdigest(),
-            "target":"row_normalized_P","diagonal":"independent_replica_cross_product",
+            "target":"row_normalized_P","diagonal":"method_specific",
+            "diagonal_by_method":{"mc":"independent_replica_cross_product",
+                                  "gvoys":"feature_square"},
             "threads":{k:os.environ.get(k) for k in ("OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","MKL_NUM_THREADS")}}

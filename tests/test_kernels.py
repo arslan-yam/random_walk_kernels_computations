@@ -2,6 +2,7 @@
 
 import itertools
 import unittest
+from unittest.mock import patch
 
 import networkx as nx
 import numpy as np
@@ -146,6 +147,25 @@ class DeterministicTests(unittest.TestCase):
                 n_label_samples_per_length=3, q_sampling_kind="random", seed=12)
         assert_array_equal(a, b)
 
+    def test_gvoys_uses_one_realization_and_a_psd_feature_gram(self):
+        Ps, vs, ws = inputs(True)
+        features = np.array([[1., -2., 3.], [4., 5., -6.]])
+
+        def feature(graph, shared, seed, graph_id, walk_id, *args):
+            return features[graph_id, walk_id]
+
+        with patch.object(gvoys, "_feature", side_effect=feature) as sampler:
+            result = gvoys.random_walk_kernel_gvoys_labeled_dataset(
+                Ps, vs, ws, nb_random_walks=3, block_size=2,
+            )
+        self.assertEqual(sampler.call_count, len(Ps)*3)
+        assert_allclose(result, features @ features.T / 3)
+        self.assertGreaterEqual(np.linalg.eigvalsh(result).min(), -1e-14)
+        metadata = KernelConfig().metadata()
+        self.assertEqual(metadata["gvoys_replicas"], 1)
+        self.assertEqual(metadata["gvoys_sides_per_replica"], 2)
+        self.assertEqual(metadata["mc_replicas"], 2)
+
     def test_invalid_inputs_are_rejected(self):
         P = sp.eye(2)
         v = w = np.ones(2)/2
@@ -166,7 +186,7 @@ class DeterministicTests(unittest.TestCase):
 
 
 class StatisticalTests(unittest.TestCase):
-    def test_estimators_against_exact_including_diagonal(self):
+    def test_pair_estimators_and_mc_diagonal_against_exact(self):
         # Independent run-level SE: repeated labels within one length are not
         # incorrectly counted as independent observations. Fixed seeds avoid flakiness.
         for labeled in (False, True):
@@ -183,9 +203,29 @@ class StatisticalTests(unittest.TestCase):
                                          seed=seed, labeled=labeled) for seed in range(24)])
                         se = runs.std(axis=0, ddof=1)/np.sqrt(len(runs))
                         error = abs(runs.mean(axis=0)-exact)
-                        self.assertTrue(np.all(error <= 6*se+1e-5),
+                        # GVoys uses the original feature-square diagonal, not
+                        # an independent self-pair estimate. Only MC corrects it.
+                        checked = np.ones_like(exact, dtype=bool) if method == "mc" else ~np.eye(len(Ps), dtype=bool)
+                        self.assertTrue(np.all(error[checked] <= 6*se[checked]+1e-5),
                             f"{method}/{kind}/labeled={labeled}: error={error}, SE={se}")
                         self.assertTrue(np.all(se > 0))
+                        if method == "gvoys":
+                            for K in runs:
+                                self.assertGreaterEqual(np.linalg.eigvalsh(K).min(), -1e-12)
+
+    def test_gvoys_independent_self_pair_against_exact(self):
+        Ps, vs, ws = inputs(True)
+        config = KernelConfig(lmbd=0.3, n_samples_gvoys=180, anchor_fraction=0.5)
+        exact = compute_kernel("direct", Ps[:1], vs[:1], ws[:1], config, labeled=True)[0, 0]
+        runs = np.array([
+            gvoys.random_walk_kernel_gvoys_labeled(
+                Ps[0], Ps[0], vs[0], vs[0], ws[0], ws[0],
+                kind="geom", lambda_coeff=0.3, nb_random_walks=180,
+                anchor_fraction=0.5, seed=seed,
+            ) for seed in range(24)
+        ])
+        se = runs.std(ddof=1)/np.sqrt(len(runs))
+        self.assertLessEqual(abs(runs.mean()-exact), 6*se+1e-5)
 
 
 if __name__ == "__main__":

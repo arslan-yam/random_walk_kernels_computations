@@ -76,7 +76,7 @@ def parse_args(argv=None):
     option(parser,"direct_max_nodes",type=int,default=DIRECT_NODE_LIMIT,
            help="Skip direct at or above this vertex count (0..128); 0 disables direct.")
     option(parser,"sylvester_max_nodes",type=int,default=512)
-    option(parser,"output_dir",default="results_v2/synthetic")
+    option(parser,"output_dir",default="results/synthetic")
     option(parser,"output",help="Exact JSON path; existing files require --overwrite.")
     option(parser,"experiment_name",default="run")
     option(parser,"save_grams",action="store_true")

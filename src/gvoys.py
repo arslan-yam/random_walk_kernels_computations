@@ -4,7 +4,8 @@ Public kernels accept P=D^-1 A (or label restrictions of P). Internally they
 use the equivalent symmetric matrices S and transformed boundary weights.
 Uniform neighbor proposals carry degree*S[x,y] importance corrections.
 Random signs and halt lengths are shared across graphs, but trajectories and
-anchors are independent. Two replicas remove diagonal walk/anchor bias.
+anchors are independent across graphs. One feature realization per graph is
+used to construct the usual PSD Gram matrix F @ F.T / samples.
 No random tables are allocated at import; blocks bound temporary memory.
 
 For each side and depth k, the load contains sqrt(f_k / survival_k).
@@ -20,7 +21,7 @@ import math
 
 import numpy as np
 
-from ._validation import corrected_gram, kernel_parameter, positive_int
+from ._validation import kernel_parameter, positive_int
 from .normalization import symmetric_inputs
 
 LAMBDA_COEFF = 0.1
@@ -102,10 +103,11 @@ def _side_features(graph, boundary, anchors, shared, rng, kind, lam, p_halt):
     return features
 
 
-def _feature(graph, shared, seed, graph_id, replica, walk_id, kind, lam, p_halt, anchor_fraction):
+def _feature(graph, shared, seed, graph_id, walk_id, kind, lam, p_halt, anchor_fraction):
     n = len(graph.v)
     count = max(1, int(anchor_fraction*n))
-    streams = np.random.SeedSequence([seed, 1, walk_id, graph_id, replica]).spawn(3)
+    # Keep the former first-realization stream; no second realization is drawn.
+    streams = np.random.SeedSequence([seed, 1, walk_id, graph_id, 0]).spawn(3)
     anchor_rng = np.random.default_rng(streams[0])
     ids = np.arange(n) if count == n else np.sort(anchor_rng.choice(n, count, replace=False))
     anchors = {int(node): j for j, node in enumerate(ids)}
@@ -136,17 +138,17 @@ def _dataset(Ps, vs, ws, *, labeled, anchor_fraction, kind, lambda_coeff,
     result = np.zeros((len(graphs), len(graphs)))
     for offset in range(0, samples, block_size):
         size = min(block_size, samples-offset)
-        a = np.empty((len(graphs), size))
-        b = np.empty_like(a)
+        features = np.empty((len(graphs), size))
         for j in range(size):
             walk_id = base_nb_walk_index+offset+j
             shared = _shared(seed, walk_id, labels, p_halt, max_walk_length)
             for g, graph in enumerate(graphs):
-                for replica, target in enumerate((a,b)):
-                    target[g,j] = _feature(graph, shared, seed, g, replica, walk_id,
-                                           kind, lam, p_halt, anchor_fraction)
+                features[g,j] = _feature(graph, shared, seed, g, walk_id,
+                                        kind, lam, p_halt, anchor_fraction)
         if graphs:
-            result += size/samples * corrected_gram(a,b)
+            result += (features @ features.T) / samples
+    if not np.isfinite(result).all():
+        raise FloatingPointError("non-finite GVoys estimate; reduce weight variance")
     return result
 
 
@@ -155,8 +157,9 @@ def random_walk_kernel_gvoys_dataset(Ps, vs, ws, anchor_fraction=1., kind="exp",
         seed=42, block_size=64, max_walk_length=None):
     """Normalized unlabeled RWK. Budget is outer features per start vertex.
 
-    Each feature uses two replicas, each with left/right walks. Block size
-    changes memory usage, not sampled trajectories (up to roundoff in sums).
+    Each feature uses one left/right walk construction, without an extra
+    replica or diagonal replacement. The returned feature Gram is PSD up to
+    roundoff. Block size changes memory usage, not sampled trajectories.
     """
     return _dataset(Ps,vs,ws,labeled=False,anchor_fraction=anchor_fraction,kind=kind,
         lambda_coeff=lambda_coeff,p_halt=p_halt,nb_random_walks=nb_random_walks,

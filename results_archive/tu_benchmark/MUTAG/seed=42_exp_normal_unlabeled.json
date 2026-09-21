@@ -1,0 +1,54 @@
+{
+  "dataset": "MUTAG",
+  "n_total": 188,
+  "n_used": 188,
+  "max_n": 28,
+  "edge_labels_used": false,
+  "methods": {
+    "direct": {
+      "mean_accuracy": 0.6650071123755333,
+      "std_accuracy": 0.008710845457977132,
+      "gram_time_sec": 2306.049395956099,
+      "svm_time_sec": 0.1801672875881195,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 0.0,
+        "mean_rel": 0.0,
+        "max_abs": 0.0,
+        "max_rel": 0.0
+      },
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.6702702702702702,
+      "std_accuracy": 0.010574263180680377,
+      "gram_time_sec": 76.61441476643085,
+      "svm_time_sec": 0.17243755608797073,
+      "selected_c_mean": 60.00039999999999,
+      "selected_c_mode": 100.0,
+      "rel_error": {
+        "mean_abs": 0.00013841885848200433,
+        "mean_rel": 0.03779597819726413,
+        "max_abs": 0.0006755899767657367,
+        "max_rel": 0.15381617729668354
+      },
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.6650071123755333,
+      "std_accuracy": 0.008710845457977132,
+      "gram_time_sec": 0.7758970744907856,
+      "svm_time_sec": 0.18566954508423805,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 0.00018542762856258495,
+        "mean_rel": 0.05035259185230696,
+        "max_abs": 0.005566884297624105,
+        "max_rel": 1.0425724639489586
+      },
+      "error": null
+    }
+  }
+}

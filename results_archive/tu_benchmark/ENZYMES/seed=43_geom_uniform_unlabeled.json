@@ -1,0 +1,84 @@
+{
+  "dataset": "ENZYMES",
+  "n_total": 600,
+  "n_used": 600,
+  "max_n": 126,
+  "edge_labels_used": false,
+  "methods": {
+    "direct": {
+      "mean_accuracy": 0.15999999999999998,
+      "std_accuracy": 0.03391164991562635,
+      "gram_time_sec": 1755.4039309993386,
+      "svm_time_sec": 0.32618510350584984,
+      "selected_c_mean": 22.2022,
+      "selected_c_mode": 1.0,
+      "rel_error": {
+        "mean_abs": 0.0,
+        "mean_rel": 0.0,
+        "max_abs": 0.0,
+        "max_rel": 0.0
+      },
+      "error": null
+    },
+    "cg": {
+      "mean_accuracy": 0.185,
+      "std_accuracy": 0.019293061504650384,
+      "gram_time_sec": 61.28892641607672,
+      "svm_time_sec": 0.3248060755431652,
+      "selected_c_mean": 22.0024,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 2.796267705352803e-19,
+        "mean_rel": 2.2756707331487103e-16,
+        "max_abs": 1.3877787807814457e-17,
+        "max_rel": 5.565571152092248e-15
+      },
+      "error": null
+    },
+    "fixed_point": {
+      "mean_accuracy": 0.16499999999999998,
+      "std_accuracy": 0.02953340857778226,
+      "gram_time_sec": 98.95480905566365,
+      "svm_time_sec": 0.3261448061093688,
+      "selected_c_mean": 42.2002,
+      "selected_c_mode": 100.0,
+      "rel_error": {
+        "mean_abs": 3.360761707507345e-19,
+        "mean_rel": 3.1156505228931927e-16,
+        "max_abs": 5.551115123125783e-17,
+        "max_rel": 9.961274774860543e-15
+      },
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.17166666666666666,
+      "std_accuracy": 0.010000000000000009,
+      "gram_time_sec": 150.33182610478252,
+      "svm_time_sec": 0.3530973708257079,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 6.823030391994246e-06,
+        "mean_rel": 0.0033637469987303106,
+        "max_abs": 0.01584509321540023,
+        "max_rel": 0.0625978991225688
+      },
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.17,
+      "std_accuracy": 0.020138409955990956,
+      "gram_time_sec": 2.5755962105467916,
+      "svm_time_sec": 0.323439272120595,
+      "selected_c_mean": 2.4219999999999997,
+      "selected_c_mode": 1.0,
+      "rel_error": {
+        "mean_abs": 3.568141725131335e-19,
+        "mean_rel": 3.234099529925962e-16,
+        "max_abs": 5.551115123125783e-17,
+        "max_rel": 1.0758176756849386e-14
+      },
+      "error": null
+    }
+  }
+}

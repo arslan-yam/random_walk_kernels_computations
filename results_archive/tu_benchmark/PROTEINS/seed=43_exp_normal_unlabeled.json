@@ -1,0 +1,39 @@
+{
+  "dataset": "PROTEINS",
+  "n_total": 1113,
+  "n_used": 1113,
+  "max_n": 620,
+  "edge_labels_used": false,
+  "methods": {
+    "direct": {
+      "mean_accuracy": null,
+      "std_accuracy": null,
+      "gram_time_sec": null,
+      "svm_time_sec": null,
+      "selected_c_mean": null,
+      "selected_c_mode": null,
+      "rel_error": null,
+      "error": "skipped (graph too large for this method)"
+    },
+    "gvoys": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 1485.2781740687788,
+      "svm_time_sec": 0.8393120393157005,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": null,
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 7.45872313901782,
+      "svm_time_sec": 1.9067347757518291,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": null,
+      "error": null
+    }
+  }
+}

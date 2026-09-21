@@ -1,0 +1,35 @@
+{
+  "dataset": "MUTAG",
+  "n_total": 188,
+  "n_used": 188,
+  "max_n": 28,
+  "methods": {
+    "direct": {
+      "mean_accuracy": 0.6650071123755333,
+      "std_accuracy": 0.008710845457977132,
+      "gram_time_sec": 2303.1125037819147,
+      "svm_time_sec": 0.1494140699505806,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.6650071123755333,
+      "std_accuracy": 0.008710845457977132,
+      "gram_time_sec": 70.5318995192647,
+      "svm_time_sec": 0.1481955535709858,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.6650071123755333,
+      "std_accuracy": 0.008710845457977132,
+      "gram_time_sec": 0.7517967149615288,
+      "svm_time_sec": 0.14680836722254753,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "error": null
+    }
+  }
+}

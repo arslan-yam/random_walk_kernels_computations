@@ -315,7 +315,7 @@ def compute_kernel_matrix(method, Ps, vs, ws, kind, mu_func, lmbd,
 def run_tu_benchmark(dataset_names,kind,methods,max_graphs,max_nodes_per_graph,
         n_samples_mc,n_samples_gvoys,c_values,n_splits,n_repeats,inner_splits,
         normalize_kernel,root_dir,seed,distribution_func="uniform",
-        output_dir="results_v2/tu_benchmark",save_grams=False,request_edge_labels=False,
+        output_dir="results/tu_benchmark",save_grams=False,request_edge_labels=False,
         *,config=None,cli_args=None,skip_svm=False,check_psd=False,fail_fast=False,
         direct_max_nodes=128,sylvester_max_nodes=512,experiment_name="run"):
     """Save raw errors and optional SVM metrics per dataset, without PSD projection.
@@ -423,7 +423,7 @@ def parse_args(argv=None):
     option(parser,"inner_splits",type=int,default=3)
     option(parser,"no_normalize",action="store_true")
     option(parser,"root_dir",default="tu_datasets")
-    option(parser,"output_dir",default="results_v2/tu_benchmark")
+    option(parser,"output_dir",default="results/tu_benchmark")
     option(parser,"save_grams",action="store_true",help="Save RAW matrices and subset indices in NPZ files.")
     option(parser,"labeled",type=int,nargs="?",const=1,choices=[0,1],default=0)
     option(parser,"experiment_name",default="run")

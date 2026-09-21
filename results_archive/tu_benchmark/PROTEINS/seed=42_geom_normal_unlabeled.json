@@ -1,0 +1,79 @@
+{
+  "dataset": "PROTEINS",
+  "n_total": 1113,
+  "n_used": 1113,
+  "max_n": 620,
+  "edge_labels_used": false,
+  "methods": {
+    "direct": {
+      "mean_accuracy": null,
+      "std_accuracy": null,
+      "gram_time_sec": null,
+      "svm_time_sec": null,
+      "selected_c_mean": null,
+      "selected_c_mode": null,
+      "rel_error": null,
+      "error": "skipped (graph too large for this method)"
+    },
+    "cg": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 739.5044160746038,
+      "svm_time_sec": 0.8490217104554176,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 0.0,
+        "mean_rel": 0.0,
+        "max_abs": 0.0,
+        "max_rel": 0.0
+      },
+      "error": null
+    },
+    "fixed_point": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 421.04536498710513,
+      "svm_time_sec": 0.8291773349046707,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 2.0027876800713903e-19,
+        "mean_rel": 6.61392249995672e-17,
+        "max_abs": 2.7755575615628914e-17,
+        "max_rel": 1.2523162991933977e-15
+      },
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 666.4610308073461,
+      "svm_time_sec": 0.8246155418455601,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 8.733659692881084e-06,
+        "mean_rel": 0.0032060322491968833,
+        "max_abs": 0.0002758092459285849,
+        "max_rel": 0.02701620941749501
+      },
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.5956853714701248,
+      "std_accuracy": 0.0008906155894254247,
+      "gram_time_sec": 7.504507929086685,
+      "svm_time_sec": 1.9332321882247925,
+      "selected_c_mean": 0.6003999999999999,
+      "selected_c_mode": 1.0,
+      "rel_error": {
+        "mean_abs": 0.00013616771442250328,
+        "mean_rel": 0.049522248555467344,
+        "max_abs": 0.08057393198044266,
+        "max_rel": 1.7113032707761155
+      },
+      "error": null
+    }
+  }
+}

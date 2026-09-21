@@ -165,7 +165,7 @@ def parse_args():
     parser.add_argument("--n-samples", type=int, default=1000)
     parser.add_argument("--lmbd", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default="./results_v2/kernel_kmeans/results.json")
+    parser.add_argument("--output", default="./results/kernel_kmeans/results.json")
     return parser.parse_args()
 
 

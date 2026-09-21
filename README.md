@@ -55,9 +55,9 @@ Isolated vertices are absorbing in the unlabeled representation and have zero
 rows in the labeled representation. These conventions differ even if all real
 edges have the same label.
 
-### Independent replicas
+### MCRWK replicas and GVoys features
 
-Both stochastic methods use two conditionally independent trajectory replicas,
+MCRWK uses two conditionally independent trajectory replicas,
 sharing the same outer random variables across graphs. With
 $\bar F=(F_1+F_2)/2$, they estimate
 
@@ -67,11 +67,19 @@ $$
 \widehat K_{ii}=\frac{C}{M}\sum_s F_{1,is}F_{2,is},
 $$
 
-where $C=\sum_k\mu_k$ for MCRWK and $C=1$ for GVoys. Averaging replicas
+where $C=\sum_k\mu_k$. Averaging replicas
 reduces off-diagonal noise; the cross product removes diagonal sampling bias.
 The resulting raw estimate is unbiased and symmetric, but **not necessarily
 positive semidefinite (PSD)**. Gram normalization or PSD projection generally
 changes its expectation. No automatic PSD projection is applied.
+
+GVoys uses one feature realization per graph and outer sample, with its
+left/right walk constructions. Its dataset matrix is $FF^\top/M$, including
+the diagonal, and is PSD up to numerical roundoff. There is no extra replica
+or diagonal correction. The independent-graph pair estimator is unbiased;
+squaring a reused random feature on the dataset diagonal is a distinct
+construction and can add conditional sampling variance. The pair API uses
+independent graph realizations even when both arguments are the same graph.
 
 ## Running experiments
 
@@ -149,7 +157,7 @@ loader reports the fallback and uses the unlabeled representation.
 | Method | Supported kernels | Edge labels | Implementation |
 |---|---|---|---|
 | `mc` | geom, exp | Yes | MCRWK with shared lengths and independent replicas. |
-| `gvoys` | geom, exp | Yes | GVoys with symmetric normalization, shared signs, and independent replicas. |
+| `gvoys` | geom, exp | Yes | GVoys with symmetric normalization, shared signs, and one feature realization per graph. |
 | `direct` | geom, exp | Yes | Explicit product graph; sparse linear solve or matrix-exponential action. |
 | `cg` | geom | Yes | Matrix-free CG on the equivalent symmetric system; reversible inputs only. |
 | `gmres` | geom | Yes | Matrix-free GMRES, also supporting nonreversible inputs through the Python API. |
@@ -218,7 +226,7 @@ of random vertex weights is not automatically invariant to vertex relabeling.
 | `--n-label-samples-per-length` | `1` | **Labeled MC:** number $n$ of independent label sequences conditional on each length. |
 | `--n-walk-reps` | `1` | **Labeled MC:** trajectories averaged inside each of the two replicas, per sequence and graph. |
 | `--q-sampling-kind` | `uniform` | **Labeled MC:** proposal for labels: `uniform`, `random`, `norm_fro`, or `norm_l1`. |
-| `--n-samples-gvoys` | `200` | Number of outer GVoys samples. Each sample uses two replicas, each with left/right walks from vertices with nonzero boundary weight. |
+| `--n-samples-gvoys` | `200` | Number of outer GVoys samples. Each sample uses one left/right walk construction per graph, with walks from vertices with nonzero boundary weight. No extra replica is generated. |
 | `--p-halt` | `0.2` | GVoys halt probability in $(0,1)$; expected sampled side length is $(1-p)/p$. |
 | `--anchor-fraction` | `1.0` | GVoys anchor fraction in $(0,1]$: `max(1, floor(fraction * number_of_vertices))` anchors. |
 | `--block-size` | `64` | Number of GVoys samples processed together. Bounds temporary feature storage; does not change sampled trajectories. |
@@ -280,8 +288,8 @@ are ignored by the other generators.
 
 Subset selection requires at least two classes, with at least two eligible
 graphs per class before subsampling. If an outer training fold has too few
-examples for inner CV, the first C candidate is used. Both randomized methods
-can return indefinite matrices; SVM accepting such a matrix does not restore
+examples for inner CV, the first C candidate is used. MCRWK can return
+indefinite matrices; SVM accepting such a matrix does not restore
 the usual PSD-kernel guarantees. Diagonal normalization requires strictly
 positive diagonal entries and otherwise reports a failure.
 

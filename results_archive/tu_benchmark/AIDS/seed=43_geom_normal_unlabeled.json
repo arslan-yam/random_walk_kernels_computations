@@ -1,0 +1,79 @@
+{
+  "dataset": "AIDS",
+  "n_total": 2000,
+  "n_used": 2000,
+  "max_n": 95,
+  "edge_labels_used": false,
+  "methods": {
+    "cg": {
+      "mean_accuracy": null,
+      "std_accuracy": null,
+      "gram_time_sec": null,
+      "svm_time_sec": null,
+      "selected_c_mean": null,
+      "selected_c_mode": null,
+      "rel_error": null,
+      "error": "CG did not converge, info=5000"
+    },
+    "direct": {
+      "mean_accuracy": 0.8,
+      "std_accuracy": 0.0,
+      "gram_time_sec": 2557.3019176907837,
+      "svm_time_sec": 1.4987584501504898,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 0.0,
+        "mean_rel": 0.0,
+        "max_abs": 0.0,
+        "max_rel": 0.0
+      },
+      "error": null
+    },
+    "fixed_point": {
+      "mean_accuracy": 0.8,
+      "std_accuracy": 0.0,
+      "gram_time_sec": 1432.0670699961483,
+      "svm_time_sec": 1.4762253873050213,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 6.81748609659711e-19,
+        "mean_rel": 8.063802738857096e-17,
+        "max_abs": 5.551115123125783e-17,
+        "max_rel": 8.244879493224864e-16
+      },
+      "error": null
+    },
+    "gvoys": {
+      "mean_accuracy": 0.8,
+      "std_accuracy": 0.0,
+      "gram_time_sec": 325.2731777690351,
+      "svm_time_sec": 1.7727884091436863,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 0.000154804391491761,
+        "mean_rel": 0.01806033018138576,
+        "max_abs": 0.02213273014684744,
+        "max_rel": 0.17532322864187924
+      },
+      "error": null
+    },
+    "mc": {
+      "mean_accuracy": 0.8,
+      "std_accuracy": 0.0,
+      "gram_time_sec": 17.348767012357712,
+      "svm_time_sec": 4.910425413399935,
+      "selected_c_mean": 0.001,
+      "selected_c_mode": 0.001,
+      "rel_error": {
+        "mean_abs": 0.0003822446131808385,
+        "mean_rel": 0.04920627942081566,
+        "max_abs": 0.039846249374344375,
+        "max_rel": 3.86875833712199
+      },
+      "error": null
+    }
+  }
+}
