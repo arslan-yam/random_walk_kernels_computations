@@ -52,7 +52,7 @@ def dataset_calibration(args, config, labeled, graphs):
 
 def run_dataset(name, graphs, y, task, args, config, labeled, c, *, seed, evaluate, tag):
     """All methods on one dataset; boundaries use args.seed, estimators and CV use seed."""
-    Ps, vs, ws = build_inputs(graphs, args.u_w_distribution, labeled, args.seed)
+    Ps, vs, ws, input_time = common.timed_inputs(graphs, args.u_w_distribution, labeled, args.seed)
     sizes = [len(g) for g in graphs]
     runs = common.expand_methods(args.methods, float(np.mean(sizes)), args.mc_fixed_m, c)
     records, matrices = common.compute_methods(runs, Ps, vs, ws, config, labeled, seed,
@@ -65,12 +65,13 @@ def run_dataset(name, graphs, y, task, args, config, labeled, c, *, seed, evalua
         try:
             record["evaluation"] = common.evaluate(K, y, task, args, seed)
             record["eval_time_sec"] = time.perf_counter()-t0
+            record["n_folds"] = len(record["evaluation"].get("scores") or record["evaluation"]["fold_scores"]["rmse"])
         except Exception as exc:
             record.update(status="failed", error=f"{task}: {exc}")
             if args.fail_fast:
                 raise
     stats = {"dataset": name, "task": task, "labeled": labeled, "lmbd": config.lmbd,
-             "n_graphs": len(graphs), "mean_nodes": float(np.mean(sizes)), "max_nodes": max(sizes)}
+             "input_time_sec": input_time, **common.graph_stats(graphs, labeled)}
     return [{**stats, **record} for record in records], matrices
 
 

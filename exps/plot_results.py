@@ -1,10 +1,10 @@
-"""Figures and markdown tables for the JSON results of exps/*.py.
+"""Figures, markdown tables and JSON summaries for the results of exps/*.py.
 
     python exps/plot_results.py results/exps/scaling/*.json --out-dir fig/exps
 
 Files of one experiment are merged, so e.g. separate runs for small and large
-sizes can be plotted together. Every figure is written with a markdown table
-of the plotted numbers (mean +- std over repeats). Exact methods are omitted
+sizes can be plotted together. Every figure is written with the plotted
+numbers (mean +- std over repeats) as a markdown table and as a JSON list. Exact methods are omitted
 from error panels: they agree with the reference to solver precision.
 """
 
@@ -132,7 +132,7 @@ def line_figure(records, x_key, xlabel, panels, title, path, *, xlog):
     """panels: (ylabel, value function, log scale, include exact methods)."""
     names = method_order({r["name"] for r in records if r.get("name")})
     fig, axes = plt.subplots(1, len(panels), figsize=(4.2*len(panels), 3.4), squeeze=False)
-    markdown = []
+    tables = []
     for ax, (ylabel, value, ylog, with_exact) in zip(axes[0], panels):
         cells = summarize(records, ["name", x_key], value)
         shown = [n for n in names if (with_exact or n not in EXACT) and any(k[0] == n for k in cells)]
@@ -148,7 +148,7 @@ def line_figure(records, x_key, xlabel, panels, title, path, *, xlog):
                         label=st["label"], linewidth=2, markersize=6, capsize=2, elinewidth=1,
                         markeredgecolor="white", markeredgewidth=1, zorder=3+len(shown)-rank)
         finish(ax, xlabel, ylabel, xlog, ylog)
-        markdown.append(table(f"{title}: {ylabel}", shown, xs, {k: v for k, v in cells.items() if k[0] in shown}))
+        tables.append((f"{title}: {ylabel}", shown, xs, cells))
     handles = {}
     for ax in axes[0]:
         for h, l in zip(*ax.get_legend_handles_labels()):
@@ -157,15 +157,20 @@ def line_figure(records, x_key, xlabel, panels, title, path, *, xlog):
     fig.tight_layout()
     fig.legend(handles.values(), handles.keys(), loc="upper center", ncol=min(4, len(handles)),
                bbox_to_anchor=(0.5, 0.0))
-    save(fig, path, markdown)
+    save(fig, path, tables)
 
 
-def save(fig, path, markdown):
+def save(fig, path, tables):
+    """PNG plus its numbers; tables are (title, methods, x values, cells)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path)
     plt.close(fig)
-    path.with_suffix(".md").write_text("\n".join(markdown))
-    print(f"wrote {path} and {path.with_suffix('.md')}")
+    path.with_suffix(".md").write_text("\n".join(table(*t) for t in tables))
+    summary = [{"table": title, "method": row, "x": column, "mean": mean, "std": std, "n": n}
+               for title, rows, columns, cells in tables for row in rows for column in columns
+               if (row, column) in cells for mean, std, n in [cells[row, column]]]
+    path.with_suffix(".json").write_text(json.dumps(summary, indent=2, allow_nan=False)+"\n")
+    print(f"wrote {path} (+ .md, .json)")
 
 
 def cases(records):
@@ -227,8 +232,7 @@ def dot_figure(records, datasets, value, xlabel, title, path, *, xlog, xerr=None
             log_axis(ax.xaxis, ax.set_xscale)
     fig.suptitle(title, fontsize=10)
     fig.tight_layout()
-    markdown = [table(f"{title}: {xlabel}", names, datasets, {k: v for k, v in cells.items()})]
-    save(fig, path, markdown)
+    save(fig, path, [(f"{title}: {xlabel}", names, datasets, cells)])
 
 
 def full_size(records):

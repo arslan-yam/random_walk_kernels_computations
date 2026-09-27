@@ -60,6 +60,10 @@ class ExpsTests(unittest.TestCase):
                 expected = "skipped" if record["case"] == "labeled" and record["name"] == "sylvester" else "ok"
                 self.assertEqual(record["status"], expected, record)
                 self.assertEqual(record["reference"], "direct")
+                self.assertIn("input_time_sec", record)
+                if expected == "ok":
+                    self.assertEqual(np.shape(record["gram"]), (2, 2))
+                    self.assertIsNotNone(record["time_sec"])
                 if record["name"] == "mc_cN":
                     self.assertEqual(record["m"], max(1, round(c[record["case"]]*record["n_nodes"])))
             names = {r["name"] for r in data["records"]}
@@ -67,6 +71,8 @@ class ExpsTests(unittest.TestCase):
                                      "mc_m=20", "mc_m=40"})
             self.run_script("plot_results.py", str(output), "--out-dir", tmp)
             self.assertTrue((Path(tmp)/"scaling_labeled.png").exists())
+            summary = json.loads((Path(tmp)/"scaling_labeled.json").read_text())
+            self.assertEqual({row["x"] for row in summary}, {8, 12})
 
     def test_tu_scripts_on_local_classification_and_regression_data(self):
         graphs = toy_graphs()
@@ -85,6 +91,8 @@ class ExpsTests(unittest.TestCase):
                 self.assertEqual(record["status"], "ok", record)
                 key = "mean_accuracy" if record["task"] == "classification" else "mean_rmse"
                 self.assertIn(key, record["evaluation"])
+                self.assertEqual(record["n_folds"], 2)
+                self.assertEqual(np.shape(record["gram"]), (12, 12))
             output = Path(tmp)/"gram.json"
             self.run_script("gram_time.py", *common_args, "--n-graphs-list", "4", "--n-repeats", "2",
                             "--output", str(output))

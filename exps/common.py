@@ -77,6 +77,8 @@ def add_kernel_arguments(parser, *, gvoys_samples, output_dir):
     option(parser,"experiment_name",default="run")
     option(parser,"output",help="Exact JSON path; default is <output-dir>/<experiment-name>_<UTC stamp>.json.")
     option(parser,"fail_fast",action="store_true")
+    option(parser,"json_gram_max_graphs",type=int,default=16,
+           help="Store Gram matrices of at most this many graphs in the JSON records; 0 disables.")
 
 
 def validate_kernel_arguments(parser, args):
@@ -191,7 +193,28 @@ def compute_methods(runs, Ps, vs, ws, config, labeled, seed, *, max_nodes, args,
         K = matrices.get(record["name"])
         record["reference"] = ref
         record["errors"] = gram.matrix_errors(matrices[ref], K) if ref and K is not None else None
+        if K is not None:
+            record["diagonal_min"] = float(np.min(np.diag(K)))
+            if len(K) <= args.json_gram_max_graphs:
+                record["gram"] = K.tolist()
     return records, matrices
+
+
+def graph_stats(graphs, labeled):
+    nodes = [len(g) for g in graphs]
+    edges = [g.number_of_edges() for g in graphs]
+    stats = {"n_graphs": len(graphs), "mean_nodes": float(np.mean(nodes)), "max_nodes": max(nodes),
+             "mean_edges": float(np.mean(edges)),
+             "mean_degree": float(np.mean([2*e/n for n, e in zip(nodes, edges)]))}
+    if labeled:
+        stats["n_edge_labels"] = len({d["label"] for g in graphs for *_, d in g.edges(data=True)})
+    return stats
+
+
+def timed_inputs(graphs, distribution, labeled, seed):
+    t0 = time.perf_counter()
+    Ps, vs, ws = build_inputs(graphs, distribution, labeled, seed)
+    return Ps, vs, ws, time.perf_counter()-t0
 
 
 def matched_c(args, config, labeled, calibration_inputs, n_ref, seed):

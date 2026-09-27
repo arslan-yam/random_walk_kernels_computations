@@ -5,6 +5,21 @@ Each experiment writes one JSON file, by default to `results/exps/<experiment>/`
 The file is rewritten after every finished size or dataset, so an interrupted
 run keeps its completed rows.
 
+The JSON holds one record per method run with the following fields:
+
+- `time_sec` (Gram time) and `input_time_sec` (building P, v, w);
+- `errors` against the reference (every metric of `src.gram.matrix_errors`)
+  and `diagonal_min`;
+- the MCRWK budget `m` and, for `mc_matched`, `c`;
+- graph statistics;
+- for TU runs, `evaluation`: accuracy or RMSE/MAE/R², per-fold scores and the
+  selected C/ε, plus `eval_time_sec`.
+
+Gram matrices with at most `--json-gram-max-graphs` graphs (default 16, so
+every scaling pair) are stored in the record as `gram`. The `calibrations` list
+records how each c was chosen. `metadata` holds the CLI arguments, library
+versions and a source hash.
+
 All experiments share the same settings:
 
 - Kernel: geometric with λ = 0.7.
@@ -26,7 +41,7 @@ All experiments share the same settings:
 | `tu_svm.py` | Nested-CV SVM accuracy on MUTAG, ENZYMES, PTC_MR, AIDS and NCI1, and SVR regression (RMSE, MAE, R²) on ZINC_test. Records Gram time and evaluation time. |
 | `gram_time.py` | Gram-matrix build time on the five classification datasets. `--n-graphs-list` also times subsets with those numbers of graphs. |
 | `lambda_sweep.py` | λ = 0.1 … 0.9. The synthetic setting measures runtime and error; the TU setting measures Gram time, error and SVM accuracy. c is recalibrated for every λ. |
-| `plot_results.py` | Writes a PNG and a markdown table for each figure. Results from several JSON files of one experiment are merged. |
+| `plot_results.py` | Writes a PNG for each figure, plus its numbers (mean ± std over repeats) as `.md` and `.json`. Results from several JSON files of one experiment are merged. |
 
 In the labeled case, datasets without edge labels (ENZYMES, NCI1) are skipped.
 TU datasets are downloaded into `--root-dir` (default `tu_datasets/`). By default

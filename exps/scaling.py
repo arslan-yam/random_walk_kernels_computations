@@ -24,8 +24,6 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import numpy as np
-
 from exps import common
 from src import utils
 from src.benchmark import build_inputs, option
@@ -74,12 +72,12 @@ def run_size(n_nodes, args, config, labeled, c, repeat, tag):
     """All methods on one Gram of n_graphs graphs with n_nodes vertices."""
     graphs = make_graphs(n_nodes, args, labeled, 10_000*repeat)
     seed = args.seed+repeat
-    Ps, vs, ws = build_inputs(graphs, args.u_w_distribution, labeled, seed)
+    Ps, vs, ws, input_time = common.timed_inputs(graphs, args.u_w_distribution, labeled, seed)
     runs = common.expand_methods(args.methods, n_nodes, args.mc_fixed_m, c)
     records, _ = common.compute_methods(runs, Ps, vs, ws, config, labeled, seed,
                                         max_nodes=n_nodes, args=args, tag=tag)
     stats = {"n_nodes": n_nodes, "repeat": repeat, "labeled": labeled, "lmbd": config.lmbd,
-             "n_graphs": len(graphs), "mean_degree": float(np.mean([2*g.number_of_edges()/len(g) for g in graphs]))}
+             "input_time_sec": input_time, **common.graph_stats(graphs, labeled)}
     return [{**stats, **record} for record in records]
 
 
