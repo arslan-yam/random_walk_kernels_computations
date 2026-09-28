@@ -37,7 +37,8 @@ All experiments share the same settings:
   version (`<name>_biased`) keeps the diagonal of the averaged-feature Gram;
   it is PSD, and its excess τ ≥ 0 acts as a ridge. `tu_svm`, `lambda_sweep`,
   `q_sampling` and `n_sampling` evaluate both; `scaling` and `gram_time` only
-  the unbiased one. The runtime is the same for both. Set this with
+  the unbiased one; `scaling` computes only k(G₁, G₂), where the diagonal does
+  not enter. The runtime is the same for both. Set this with
   `--mc-diagonals`. `--check-psd` records the smallest eigenvalue of each Gram.
 - Two SVM evaluations, kept apart (`--svm kernel linear`, default both):
   - `evaluation`: SVC (or SVR) on the Gram of every method, exact ones
@@ -62,7 +63,7 @@ All experiments share the same settings:
 
 | Script | Experiment |
 |---|---|
-| `scaling.py` | Runtime and relative error for graph pairs with N = 8 … 8192 (BA, m = 2; labeled graphs have 3 labels, each with probability 1/3). Direct runs for N < 128, Sylvester (unlabeled only) for N ≤ 512. |
+| `scaling.py` | Runtime and relative error of the pair kernel k(G₁, G₂) alone (no Gram matrix) for graph pairs with N = 8 … 8192 (BA, m = 2; labeled graphs have 3 labels, each with probability 1/3). Direct runs for N < 128, Sylvester (unlabeled only) for N ≤ 512. |
 | `tu_svm.py` | Nested-CV SVM accuracy on MUTAG, ENZYMES, PTC_MR, AIDS and NCI1, and SVR regression (RMSE, MAE, R²) on ZINC_test. Records Gram time and evaluation time. |
 | `gram_time.py` | Gram-matrix build time on the five full classification datasets. For GVoys and MCRWK the feature construction before the Gram (`feature_time_sec`) is recorded and plotted separately from the full time. |
 | `lambda_sweep.py` | λ = 0.1 … 0.9. The synthetic setting measures runtime and error; the TU setting measures Gram time, error and SVM accuracy. c is recalibrated for every λ. |

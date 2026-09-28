@@ -99,6 +99,11 @@ def error(metric):
     return lambda record: (record.get("errors") or {}).get(metric)
 
 
+def pair_error(metric):
+    """|k_hat - k| / k of the pair experiments (scaling, synthetic lambda sweep); older Gram runs use metric."""
+    return lambda record: (record.get("errors") or {}).get("rel", (record.get("errors") or {}).get(metric))
+
+
 def evaluation(key, field="evaluation"):
     """Kernel-SVM result by default; field="evaluation_linear" for the linear SVM on features."""
     return lambda record: (record.get(field) or {}).get(key) if record.get("status") == "ok" else None
@@ -208,7 +213,7 @@ def plot_scaling(records, out, metric):
         rows = [r for r in records if r.get("case") == case]
         line_figure(rows, "n_nodes", "vertices per graph N",
                     [("runtime, s", unbiased_only(runtime), True, True),
-                     ("relative error", unbiased_only(error(metric)), True, False)],
+                     ("relative error of k(G1, G2)", unbiased_only(pair_error(metric)), True, False)],
                     f"Scaling, {case}", out/f"scaling_{case}.png", xlog=True)
 
 
@@ -217,7 +222,7 @@ def plot_lambda(records, out, metric):
     for case in cases(synthetic):
         rows = [r for r in synthetic if r.get("case") == case]
         line_figure(rows, "lmbd", "λ", [("runtime, s", unbiased_only(runtime), True, True),
-                    ("relative error", unbiased_only(error(metric)), True, False)],
+                    ("relative error of k(G1, G2)", unbiased_only(pair_error(metric)), True, False)],
                     f"λ sweep, synthetic, {case}", out/f"lambda_synthetic_{case}.png", xlog=False)
     tu = [r for r in records if r.get("setting") == "tu" and r.get("name")]
     for dataset in sorted({r["dataset"] for r in tu}):

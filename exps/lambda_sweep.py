@@ -24,7 +24,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from exps import common
-from exps.scaling import add_graph_arguments, run_size, synthetic_calibration, validate_graph_arguments
+from exps.scaling import (add_graph_arguments, run_size, synthetic_calibration, validate_graph_arguments,
+                          validate_pair)
 from exps.tu_svm import run_datasets
 from src.benchmark import option
 
@@ -66,6 +67,7 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     common.validate_kernel_arguments(parser, args)
     validate_graph_arguments(parser, args, [args.n_nodes])
+    validate_pair(parser, args)
     for lmbd in args.lambdas:
         try:
             common.kernel_config(args, lmbd)

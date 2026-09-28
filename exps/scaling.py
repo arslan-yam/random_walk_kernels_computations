@@ -2,14 +2,18 @@
 
 For every size N (default 8, 16, ..., 8192) and repeat, a pair of sparse
 synthetic graphs (BA with m=2 by default; labeled graphs get 3 edge labels,
-each with probability 1/3) is built with normal boundary vectors. All methods
-compute the same Gram matrix and are compared with the reference: direct for
-N < 128 (its hard cap), CG otherwise. Sylvester runs only unlabeled.
+each with probability 1/3) is built with normal boundary vectors. Every method
+computes only the pair kernel k(G1, G2), not a Gram matrix, so its time is the
+per-pair cost of the paper: one linear system for Direct, CG and FP, one
+Sylvester solve, and for GVoys and MCRWK the features of the two graphs and
+one dot product. The error is |k_hat - k| / k against the reference: direct
+for N < 128 (its hard cap), CG otherwise. Sylvester runs only unlabeled, for
+N <= --sylvester-max-nodes.
 
 MCRWK runs with m = c*N (mc_matched; c calibrated once per case at
 --calibration-n so that it takes as long as GVoys) and with the fixed budgets
 of --mc-fixed-m. GVoys uses a fixed number of samples, so its cost is linear
-in N.
+in N. The MCRWK diagonal choice (--mc-diagonals) does not affect k(G1, G2).
 
 Paper run:
     python exps/scaling.py
@@ -21,12 +25,14 @@ Quick check:
 import argparse
 from pathlib import Path
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from exps import common
-from src import utils
-from src.benchmark import build_inputs, option
+from src import gvoys, mcrwk, rwk, utils
+from src.benchmark import (CG_REFERENCE_MIN_NODES, build_inputs, method_seed, method_skip_reason, option,
+                           reference_method)
 
 # Graph seeds of calibration graphs; repeats use graph_seed + 10000*repeat + i.
 CALIBRATION_SEED_OFFSET = 1_000_000
@@ -38,7 +44,8 @@ def add_graph_arguments(parser):
     option(parser,"p_er",type=float,help="ER edge probability; default min(1, 2/N).")
     option(parser,"ws_k",type=int)
     option(parser,"n_labels",type=int,default=3,help="Edge labels, each drawn with probability 1/n_labels.")
-    option(parser,"n_graphs",type=int,default=2,help="Graphs per Gram matrix; 2 is one pair.")
+    option(parser,"n_graphs",type=int,default=2,
+           help="Graphs per run (exps/convergence.py); scaling and the synthetic lambda sweep use one pair.")
     option(parser,"n_repeats",type=int,default=3,help="Independent graphs, boundary vectors and estimator seeds.")
     option(parser,"graph_seed",type=int,default=0)
 
@@ -48,6 +55,11 @@ def validate_graph_arguments(parser, args, sizes):
         parser.error("require sizes >= 2, n_graphs, n_repeats, n_labels >= 1 and nonnegative graph_seed")
     if args.graph_type == "ba" and min(sizes) <= args.ba_m:
         parser.error("BA graphs need more vertices than --ba-m")
+
+
+def validate_pair(parser, args):
+    if args.n_graphs != 2:
+        parser.error("this experiment computes k(G1, G2) of one pair per repeat; --n-graphs must be 2")
 
 
 def make_graphs(n_nodes, args, labeled, seed_offset):
@@ -68,14 +80,75 @@ def synthetic_calibration(args, config, labeled, n_nodes):
     return common.matched_c(args, config, labeled, inputs, n_nodes, args.seed)
 
 
+def pair_kernel(method, Ps, vs, ws, config, seed, labeled):
+    """k(G1, G2) alone: no diagonal entries and no Gram matrix."""
+    (P1, P2), (v1, v2), (w1, w2) = Ps, vs, ws
+    mu = utils.mu_func_gen(config.kind, config.lmbd)
+    suffix = "_labeled" if labeled else ""
+    if method == "direct":
+        return getattr(rwk, "random_walk_kernel"+suffix)(P1, P2, v1, v2, w1, w2, mu, kind=config.kind)
+    if method in ("cg", "fixed_point"):
+        return getattr(rwk, f"random_walk_kernel_{method}{suffix}")(P1, P2, v1, v2, w1, w2, mu,
+                                                                     eps=config.solver_tol, max_iter=config.max_iter)
+    if method == "sylvester":
+        return rwk.random_walk_kernel_sylvester(P1, P2, v1, v2, w1, w2, mu)
+    if method == "mc":
+        sample = mcrwk.random_walk_kernel_mc_features(Ps, vs, ws, mu, config.kind,
+            n_length_samples=config.lengths if labeled else config.n_samples_mc,
+            n_label_samples_per_length=config.n_label_samples_per_length, n_walk_reps=config.n_walk_reps,
+            q_sampling_kind=config.q_sampling_kind, seed=seed, labeled=labeled)
+        return float(sample.scale*(sample.features[0] @ sample.features[1]))
+    if method == "gvoys":
+        X = gvoys.random_walk_kernel_gvoys_features(Ps, vs, ws, labeled, anchor_fraction=config.anchor_fraction,
+            kind=config.kind, lambda_coeff=config.lmbd, p_halt=config.p_halt,
+            nb_random_walks=config.n_samples_gvoys, seed=seed, block_size=config.block_size)
+        return float(X[0] @ X[1])
+    raise ValueError(f"unknown method: {method}")
+
+
+def compute_pair(runs, Ps, vs, ws, config, labeled, seed, *, n_nodes, args, tag):
+    """Time k(G1, G2) of every run; errors against direct (N < 128) or CG, added when not requested."""
+    if config.kind == "geom" and n_nodes >= CG_REFERENCE_MIN_NODES and "cg" not in {r["method"] for r in runs}:
+        runs = runs+[{"name": "cg", "method": "cg", "variant": None, "reference_only": True}]
+    values, records = {}, []
+    for run in runs:
+        record = {**run, "status": "ok", "time_sec": None}
+        reason = method_skip_reason(run["method"], kind=config.kind, labeled=labeled, max_nodes=n_nodes,
+                                    direct_max_nodes=args.direct_max_nodes,
+                                    sylvester_max_nodes=args.sylvester_max_nodes)
+        if reason:
+            records.append({**record, "status": "skipped", "reason": reason})
+            continue
+        cfg = common.with_mc_budget(config, run["m"]) if run["method"] == "mc" else config
+        print(f"{tag} {run['name']} ...", end=" ", flush=True)
+        t0 = time.perf_counter()
+        try:
+            values[run["name"]] = pair_kernel(run["method"], Ps, vs, ws, cfg, method_seed(seed, run["method"]), labeled)
+            record["time_sec"] = time.perf_counter()-t0
+            print(f"{record['time_sec']:.4g}s", flush=True)
+        except Exception as exc:
+            print(f"failed: {exc}", flush=True)
+            record.update(status="failed", error=str(exc), time_sec=time.perf_counter()-t0)
+            if args.fail_fast:
+                raise
+        records.append(record)
+    ref = reference_method(values, kind=config.kind, max_nodes=n_nodes)
+    for record in records:
+        value = values.get(record["name"])
+        record.update(value=value, reference=ref, reference_value=values.get(ref) if ref else None, errors=None)
+        if ref and value is not None and values[ref] != 0:
+            gap = abs(value-values[ref])
+            record["errors"] = {"abs": gap, "rel": gap/abs(values[ref])}
+    return records
+
+
 def run_size(n_nodes, args, config, labeled, c, repeat, tag):
-    """All methods on one Gram of n_graphs graphs with n_nodes vertices."""
+    """All methods on k(G1, G2) of one pair with n_nodes vertices."""
     graphs = make_graphs(n_nodes, args, labeled, 10_000*repeat)
     seed = args.seed+repeat
     Ps, vs, ws, input_time = common.timed_inputs(graphs, args.u_w_distribution, labeled, seed)
     runs = common.expand_methods(args.methods, n_nodes, args.mc_fixed_m, c)
-    records, _, _ = common.compute_methods(runs, Ps, vs, ws, config, labeled, seed,
-                                        max_nodes=n_nodes, args=args, tag=tag)
+    records = compute_pair(runs, Ps, vs, ws, config, labeled, seed, n_nodes=n_nodes, args=args, tag=tag)
     stats = {"n_nodes": n_nodes, "repeat": repeat, "labeled": labeled, "lmbd": config.lmbd,
              "input_time_sec": input_time, **common.graph_stats(graphs, labeled)}
     return [{**stats, **record} for record in records]
@@ -90,6 +163,7 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     common.validate_kernel_arguments(parser, args)
     validate_graph_arguments(parser, args, args.sizes+[args.calibration_n])
+    validate_pair(parser, args)
     return args
 
 

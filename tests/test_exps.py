@@ -62,8 +62,13 @@ class ExpsTests(unittest.TestCase):
                 self.assertEqual(record["reference"], "direct")
                 self.assertIn("input_time_sec", record)
                 if expected == "ok":
-                    self.assertEqual(np.shape(record["gram"]), (2, 2))
+                    # One pair value k(G1, G2), no Gram matrix.
+                    self.assertNotIn("gram", record)
+                    self.assertTrue(np.isfinite(record["value"]))
                     self.assertIsNotNone(record["time_sec"])
+                    self.assertGreaterEqual(record["errors"]["rel"], 0)
+                    if record["name"] == "direct":
+                        self.assertEqual(record["errors"]["rel"], 0)
                 if record["name"] == "mc_cN":
                     self.assertEqual(record["m"], max(1, round(c[record["case"]]*record["n_nodes"])))
             names = {r["name"] for r in data["records"]}
