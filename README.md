@@ -74,9 +74,19 @@ positive semidefinite (PSD)**. Gram normalization or PSD projection generally
 changes its expectation. No automatic PSD projection is applied.
 
 `--mc-diagonal biased` keeps the diagonal of $\frac{C}{M}\bar F\bar F^\top$
-instead. That matrix is PSD, and its diagonal exceeds the unbiased one by
-$\frac{C}{M}\sum_s\big((F_{1,is}-F_{2,is})/2\big)^2\ge0$ in every run. In
-expectation this adds $\tau_i=\frac{C}{2}\,\mathbb E[\operatorname{Var}(F_i\mid\text{lengths, labels})]$,
+instead. That matrix is PSD. In every run its diagonal exceeds the unbiased
+one by
+
+$$
+\frac{C}{M}\sum_s\left(\frac{F_{1,is}-F_{2,is}}{2}\right)^2\ge 0,
+$$
+
+so in expectation it adds
+
+$$
+\tau_i=\frac{C}{2}\,\mathbb{E}\left[\mathrm{Var}\left(F_i \mid \text{lengths, labels}\right)\right],
+$$
+
 a graph-dependent ridge that does not shrink with $M$. Off-diagonal entries are
 identical in both versions. The Python API also accepts `diagonal="both"`,
 which returns both Grams from one run.
