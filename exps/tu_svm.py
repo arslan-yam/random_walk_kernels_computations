@@ -49,8 +49,12 @@ def dataset_calibration(args, config, labeled, graphs):
                             n_ref, args.seed)
 
 
-def run_dataset(name, graphs, y, task, args, config, labeled, c, *, seed, evaluate, tag):
-    """All methods on one dataset; boundaries use args.seed, estimators and CV use seed."""
+def run_dataset(name, graphs, y, task, args, config, labeled, c, *, seed, evaluate, tag, evaluator=None):
+    """All methods on one dataset; boundaries use args.seed, estimators and CV use seed.
+
+    evaluator(record, K, X, y, task, args, seed) defaults to the SVMs of
+    common.evaluate_record; exps/ridge.py passes ridge instead.
+    """
     Ps, vs, ws, input_time = common.timed_inputs(graphs, args.u_w_distribution, labeled, args.seed)
     sizes = [len(g) for g in graphs]
     runs = common.expand_methods(args.methods, float(np.mean(sizes)), args.mc_fixed_m, c)
@@ -60,8 +64,8 @@ def run_dataset(name, graphs, y, task, args, config, labeled, c, *, seed, evalua
         if not evaluate or record["status"] != "ok":
             continue
         try:
-            common.evaluate_record(record, matrices.get(record["name"]), features.get(record["name"]),
-                                   y, task, args, seed)
+            (evaluator or common.evaluate_record)(record, matrices.get(record["name"]),
+                                                  features.get(record["name"]), y, task, args, seed)
             evaluation = record.get("evaluation") or record.get("evaluation_linear") or {}
             if evaluation:
                 record["n_folds"] = len(evaluation.get("scores") or evaluation["fold_scores"]["rmse"])
@@ -74,8 +78,8 @@ def run_dataset(name, graphs, y, task, args, config, labeled, c, *, seed, evalua
     return [{**stats, **record} for record in records], matrices, features
 
 
-def run_datasets(args, payload, path, config, *, evaluate, extra=None):
-    """Loop datasets x cases; one calibration per pair. Used by experiments 2 and 4."""
+def run_datasets(args, payload, path, config, *, evaluate, extra=None, evaluator=None):
+    """Loop datasets x cases; one calibration per pair. Used by experiments 2, 4 and 8."""
     extra = extra or {}
     for name in args.datasets:
         for case in args.cases:
@@ -94,7 +98,8 @@ def run_datasets(args, payload, path, config, *, evaluate, extra=None):
                     payload["calibrations"].append({**extra, "dataset": name, "case": case,
                                                     "lmbd": config.lmbd, **calibration})
                 rows, matrices, features = run_dataset(name, graphs, y, task, args, config, labeled, c,
-                                                       seed=args.seed, evaluate=evaluate, tag=f"[{name} {case}]")
+                                                       seed=args.seed, evaluate=evaluate, tag=f"[{name} {case}]",
+                                                       evaluator=evaluator)
                 payload["records"] += [{**extra, "case": case, **row} for row in rows]
                 if getattr(args, "save_grams", False):
                     for method, K in matrices.items():

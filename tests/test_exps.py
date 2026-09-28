@@ -109,11 +109,17 @@ class ExpsTests(unittest.TestCase):
                 self.assertEqual(record["n_folds"], 2)
                 self.assertEqual(np.shape(record["gram"]), (12, 12))
             output = Path(tmp)/"gram.json"
-            self.run_script("gram_time.py", *common_args, "--n-graphs-list", "4", "--n-repeats", "2",
-                            "--output", str(output))
+            self.run_script("gram_time.py", *common_args, "--n-repeats", "2", "--output", str(output))
             records = json.loads(output.read_text())["records"]
-            self.assertEqual({r["n_graphs"] for r in records}, {4, 12})
-            self.assertEqual(len([r for r in records if r["name"] == "gvoys"]), 2*2*2*2)
+            self.assertEqual({r["n_graphs"] for r in records}, {12})
+            self.assertEqual(len([r for r in records if r["name"] == "gvoys"]), 2*2*2)
+            for record in records:
+                if record["method"] in ("gvoys", "mc"):
+                    self.assertLessEqual(record["feature_time_sec"], record["time_sec"])
+                else:
+                    self.assertNotIn("feature_time_sec", record)
+            self.run_script("plot_results.py", str(output), "--out-dir", tmp)
+            self.assertTrue((Path(tmp)/"gram_time_features_labeled.png").exists())
 
     def test_lambda_sweep_calibrates_each_lambda(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,6 +212,56 @@ class ExpsTests(unittest.TestCase):
         np.testing.assert_allclose(q("inverse"), [0.2, 0.8])
         np.testing.assert_allclose(q("sq_mean"), [5/6, 1/6])
         np.testing.assert_allclose(q("freq:1", 0.5), [0.65, 0.35])
+
+    def test_convergence_records_slopes_and_bounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/"convergence.json"
+            self.run_script("convergence.py", "--sizes", "8", "12", "--n-graphs", "3", "--n-repeats", "6",
+                            "--m-values", "20", "80", "--lambdas", "0.3", "--output", str(output))
+            data = json.loads(output.read_text())
+            self.assertEqual(len(data["summaries"]), 2*2)
+            for summary in data["summaries"]:
+                self.assertEqual(summary["n_pairs"], 3)
+                self.assertIsNotNone(summary["slope"])
+                # lambda = 0.3 < q_min: the labeled bound is finite as well.
+                self.assertTrue(all(r["m_bound_median"] is not None for r in summary["required_m"]))
+            for record in data["records"]:
+                self.assertGreater(record["variance_bound_ratio_median"], 1)
+                bound = "hoeffding" if record["case"] == "unlabeled" else "chebyshev"
+                self.assertTrue(all(bound in tail for tail in record["tails"]))
+            self.run_script("plot_results.py", str(output), "--out-dir", tmp)
+            self.assertTrue((Path(tmp)/"convergence_tails_labeled_lambda0.3.png").exists())
+            self.assertTrue((Path(tmp)/"convergence_required_m.md").exists())
+
+    def test_ridge_on_features_equals_kernel_ridge(self):
+        from exps.ridge import Ridge
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal((30, 5))
+        train, test = np.arange(20), np.arange(20, 30)
+        for task, y in (("classification", np.repeat([0, 1, 2], 10)), ("regression", X @ np.ones(5))):
+            dual = Ridge(task, y, K=X @ X.T).scores(train, test, 0.5)
+            primal = Ridge(task, y, X=X).scores(train, test, 0.5)
+            np.testing.assert_allclose(primal, dual, rtol=1e-8, atol=1e-10)
+
+    def test_ridge_script_on_local_data(self):
+        graphs = toy_graphs()
+        with tempfile.TemporaryDirectory() as tmp:
+            write_tu(tmp, "TOYC", graphs, [0]*6+[1]*6)
+            write_tu(tmp, "TOYR", graphs, [len(g)+0.5*(i % 2) for i, g in enumerate(graphs)], regression=True)
+            output = Path(tmp)/"ridge.json"
+            self.run_script("ridge.py", "--datasets", "TOYC", "TOYR", "--root-dir", tmp, "--calibration-graphs", "3",
+                            "--methods", "direct", "gvoys", "mc_fixed", "--n-splits", "2", "--inner-splits", "2",
+                            "--alphas", "0.1", "1", "--output", str(output), *FAST)
+            records = json.loads(output.read_text())["records"]
+            for record in records:
+                self.assertEqual(record["status"], "ok", record)
+                self.assertIn("selected_alphas", record["evaluation"])
+                has_features = record["name"] == "gvoys" or record["name"].endswith("_biased")
+                self.assertEqual("evaluation_linear" in record, has_features, record["name"])
+                if has_features:
+                    self.assertLess(record["primal_dual_gap"], 1e-6)
+            self.run_script("plot_results.py", str(output), "--out-dir", tmp)
+            self.assertTrue((Path(tmp)/"ridge_classification_linear_labeled.png").exists())
 
     def test_loader_reads_regression_targets_and_edge_labels(self):
         graphs = toy_graphs()

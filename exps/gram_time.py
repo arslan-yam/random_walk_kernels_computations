@@ -1,13 +1,13 @@
 """Experiment 3: Gram-matrix build time on TU datasets (no SVM).
 
-Times every method on MUTAG, ENZYMES, PTC_MR, AIDS and NCI1 (full datasets
-by default), unlabeled and edge-labeled; datasets without edge labels are
-skipped in the labeled case. Approximation errors against direct are
-recorded as well. --n-repeats repeats each timing with new estimator seeds
-(boundary vectors stay fixed). --n-graphs-list additionally times
-class-stratified subsets of the given sizes, which shows how the Gram cost
-grows with the number of graphs. c of mc_matched is calibrated once per
-dataset and case; m = c*N uses the mean graph size of each subset.
+Times every method on the full MUTAG, ENZYMES, PTC_MR, AIDS and NCI1,
+unlabeled and edge-labeled; datasets without edge labels are skipped in the
+labeled case. For GVoys and MCRWK the feature construction (feature_time_sec,
+before any Gram) is recorded apart from the Gram product (gram_build_sec);
+time_sec is their sum, comparable with the exact methods. Approximation errors
+against direct are recorded as well. --n-repeats repeats each timing with new
+estimator seeds (boundary vectors stay fixed). c of mc_matched is calibrated
+once per dataset and case.
 
 Paper run:
     python exps/gram_time.py
@@ -32,11 +32,10 @@ def parse_args(argv=None):
     common.add_kernel_arguments(parser, gvoys_samples=200, output_dir="results/exps/gram_time")
     common.add_tu_arguments(parser, datasets=common.CLASSIFICATION_DATASETS)
     option(parser,"n_repeats",type=int,default=1,help="Timings per method with different estimator seeds.")
-    option(parser,"n_graphs_list",type=int,nargs="+",help="Also time subsets with these numbers of graphs.")
     args = parser.parse_args(argv)
     common.validate_kernel_arguments(parser, args)
-    if args.n_repeats < 1 or args.calibration_graphs < 1 or any(n < 2 for n in args.n_graphs_list or []):
-        parser.error("require n_repeats >= 1, calibration_graphs >= 1 and subset sizes >= 2")
+    if args.n_repeats < 1 or args.calibration_graphs < 1:
+        parser.error("require n_repeats >= 1 and calibration_graphs >= 1")
     return args
 
 
@@ -60,16 +59,12 @@ def main(argv=None):
                 c, calibration = dataset_calibration(args, config, labeled, graphs)
                 if calibration:
                     payload["calibrations"].append({"dataset": name, "case": case, "lmbd": config.lmbd, **calibration})
-                sizes = sorted({n for n in args.n_graphs_list or [] if n < len(graphs)} | {len(graphs)})
-                for n_graphs in sizes:
-                    subset, subset_y = (graphs, y) if n_graphs == len(graphs) else \
-                        common.select_subset(graphs, y, task, n_graphs, seed=args.seed)[:2]
-                    for repeat in range(args.n_repeats):
-                        rows, _, _ = run_dataset(name, subset, subset_y, task, args, config, labeled, c,
-                                              seed=args.seed+repeat, evaluate=False,
-                                              tag=f"[{name} {case} graphs={n_graphs} r={repeat}]")
-                        payload["records"] += [{"case": case, "repeat": repeat, **row} for row in rows]
-                        common.save(payload, path)
+                for repeat in range(args.n_repeats):
+                    rows, _, _ = run_dataset(name, graphs, y, task, args, config, labeled, c,
+                                             seed=args.seed+repeat, evaluate=False,
+                                             tag=f"[{name} {case} r={repeat}]")
+                    payload["records"] += [{"case": case, "repeat": repeat, **row} for row in rows]
+                    common.save(payload, path)
             except Exception as exc:
                 print(f"  failed: {exc}", flush=True)
                 payload["records"].append({"dataset": name, "case": case, "status": "failed", "error": str(exc)})

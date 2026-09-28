@@ -1,6 +1,6 @@
 # Paper experiments
 
-Six CLI experiments and a plotting script. Run them from the repository root.
+Eight CLI experiments and a plotting script. Run them from the repository root.
 Each experiment writes one JSON file, by default to `results/exps/<experiment>/`.
 The file is rewritten after every finished size or dataset, so an interrupted
 run keeps its completed rows.
@@ -62,12 +62,14 @@ All experiments share the same settings:
 
 | Script | Experiment |
 |---|---|
-| `scaling.py` | Runtime and relative error for graph pairs with N = 8 … 8192 (BA, m = 2; labeled graphs have 3 labels, each with probability 1/3). Direct runs for N < 128, Sylvester for N ≤ 1024. |
+| `scaling.py` | Runtime and relative error for graph pairs with N = 8 … 8192 (BA, m = 2; labeled graphs have 3 labels, each with probability 1/3). Direct runs for N < 128, Sylvester (unlabeled only) for N ≤ 512. |
 | `tu_svm.py` | Nested-CV SVM accuracy on MUTAG, ENZYMES, PTC_MR, AIDS and NCI1, and SVR regression (RMSE, MAE, R²) on ZINC_test. Records Gram time and evaluation time. |
-| `gram_time.py` | Gram-matrix build time on the five classification datasets. `--n-graphs-list` also times subsets with those numbers of graphs. |
+| `gram_time.py` | Gram-matrix build time on the five full classification datasets. For GVoys and MCRWK the feature construction before the Gram (`feature_time_sec`) is recorded and plotted separately from the full time. |
 | `lambda_sweep.py` | λ = 0.1 … 0.9. The synthetic setting measures runtime and error; the TU setting measures Gram time, error and SVM accuracy. c is recalibrated for every λ. |
 | `q_sampling.py` | Labeled only (MUTAG, PTC_MR, AIDS, ZINC_test). Compares importance-sampling proposals q: uniform, q ∝ p^α (`freq:α`), `sq_mean`, `norm_l1`, `norm_fro`, `inverse` and `random`, optionally mixed with uniform (`--mix-eps`). Runs each for m ∈ {100, 1000, 10000} and λ ∈ {0.3, 0.7}, with n = 1 and 5 seeds per point. |
 | `n_sampling.py` | Varies the number of label sequences per length n ∈ {1, 2, 4, 8, 16}, either at a fixed budget B = m·n or at a fixed number of lengths m. The measured variance is recorded next to the bound (10) and its two terms. |
+| `convergence.py` | Theory check on synthetic graphs of several sizes, against the exact kernel of every pair: relative RMSE against m (slope −½, the same for every N), measured variance against the bounds (6)/(10), tail frequencies against Hoeffding (7) and Chebyshev (11), and the m actually needed for P(\|k̂−k\| > εk) ≤ δ against (8)/(12). Budgets are nested prefixes of one largest-m run per seed. |
+| `ridge.py` | Same datasets and methods as `tu_svm.py`, with ridge in place of SVM: kernel ridge on every Gram (`evaluation`) and ridge on the features of GVoys and the biased MCRWK diagonal (`evaluation_linear`). Both are the same model, and `primal_dual_gap` checks that numerically. |
 | `plot_results.py` | Writes a PNG for each figure, plus its numbers (mean ± std over repeats) as `.md` and `.json`. Results from several JSON files of one experiment are merged. |
 
 `q_sampling.py` and `n_sampling.py` write three lists:
@@ -97,10 +99,12 @@ hours, so use `--max-graphs` for class-stratified subsets.
 ```bash
 python exps/scaling.py
 python exps/tu_svm.py
-python exps/gram_time.py --n-graphs-list 100 200 400 800
+python exps/gram_time.py
 python exps/lambda_sweep.py
 python exps/q_sampling.py
 python exps/n_sampling.py
+python exps/convergence.py
+python exps/ridge.py
 python exps/plot_results.py results/exps/*/*.json --out-dir fig/exps
 ```
 
@@ -118,6 +122,13 @@ python exps/lambda_sweep.py --lambdas 0.1 0.9 --n-nodes 8 --n-repeats 1 --datase
 python exps/q_sampling.py --datasets MUTAG --max-graphs 8 --n-repeats 2 --m-values 100 --lambdas 0.7 --n-splits 2 --inner-splits 2
 python exps/n_sampling.py --datasets MUTAG --max-graphs 8 --n-repeats 2 --n-values 1 4 --budgets 400 --lengths 100 --n-splits 2 --inner-splits 2
 ```
+
+```bash
+python exps/convergence.py --sizes 8 16 --n-graphs 3 --n-repeats 5 --m-values 10 100 --lambdas 0.3
+python exps/ridge.py --datasets MUTAG ZINC_test --max-graphs 12 --n-splits 2 --inner-splits 2 --n-samples-gvoys 5 --mc-fixed-m 100 --calibration-graphs 3 --calibration-repeats 1
+```
+
+`run_experiments.ipynb` has the commands for a cluster, one job per dataset and case.
 
 Run `python exps/<script>.py --help` for all options. The smoke tests are in
 `tests/test_exps.py`.

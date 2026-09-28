@@ -81,7 +81,7 @@ def load(paths):
     by_experiment = defaultdict(lambda: defaultdict(list))
     for path in paths:
         payload = json.loads(Path(path).read_text())
-        for key in ("records", "aggregates", "references"):
+        for key in ("records", "aggregates", "references", "summaries"):
             by_experiment[payload["experiment"]][key] += payload.get(key, [])
     return by_experiment
 
@@ -139,8 +139,11 @@ def log_axis(axis, set_scale):
 
 
 def finish(ax, xlabel, ylabel, xlog=False, ylog=False):
+    """xlog=True: base-2 axis (graph sizes); xlog=10: decades labelled 1-2-5 (budgets)."""
     ax.set(xlabel=xlabel, ylabel=ylabel)
-    if xlog:
+    if xlog == 10:
+        log_axis(ax.xaxis, ax.set_xscale)
+    elif xlog:
         ax.set_xscale("log", base=2)
     if ylog:
         log_axis(ax.yaxis, ax.set_yscale)
@@ -261,15 +264,9 @@ def dot_figure(records, datasets, value, xlabel, title, path, *, xlog, xerr=None
     save(fig, path, [(f"{title}: {xlabel}", names, datasets, cells)])
 
 
-def full_size(records):
-    """Keep only rows of the largest subset per dataset (gram_time --n-graphs-list)."""
-    largest = defaultdict(int)
-    for r in records:
-        largest[r["dataset"]] = max(largest[r["dataset"]], r.get("n_graphs") or 0)
-    return [r for r in records if (r.get("n_graphs") or 0) == largest[r["dataset"]]]
-
-
-def plot_tu_svm(records, out, metric):
+def plot_tu_svm(records, out, metric, prefix="tu", models=("SVC on Gram", "linear SVM on features"),
+                gram_time=True):
+    """Kernel (every method) and linear (feature methods) results as separate figures."""
     rows = [r for r in records if r.get("name")]
     for case in cases(rows):
         in_case = [r for r in rows if r["case"] == case]
@@ -277,32 +274,34 @@ def plot_tu_svm(records, out, metric):
                                          ("regression", "mean_rmse", "std_rmse", "RMSE")]:
             subset = [r for r in in_case if r["task"] == task]
             datasets = sorted({r["dataset"] for r in subset})
-            # SVC on every Gram (one classifier: compare methods) and, separately,
-            # the linear SVM on features of GVoys and the biased MCRWK diagonal.
-            for field, model, suffix in (("evaluation", "SVC on Gram", ""),
-                                         ("evaluation_linear", "linear SVM on features", "_linear")):
+            # One model on every Gram (compare methods) and, separately, the same
+            # family on the features of GVoys and the biased MCRWK diagonal.
+            for field, model, suffix in (("evaluation", models[0], ""), ("evaluation_linear", models[1], "_linear")):
                 if any(r.get(field) for r in subset):
                     dot_figure(subset, datasets, evaluation(key, field), f"{label} (± fold std)",
-                               f"{task}, {model}, {case}", out/f"tu_{task}{suffix}_{case}.png",
+                               f"{task}, {model}, {case}", out/f"{prefix}_{task}{suffix}_{case}.png",
                                xlog=False, xerr=evaluation(spread, field))
-        datasets = sorted({r["dataset"] for r in in_case})
-        dot_figure(in_case, datasets, unbiased_only(runtime), "Gram time, s", f"Gram time, {case}",
-                   out/f"tu_gram_time_{case}.png", xlog=True)
+        if gram_time:
+            datasets = sorted({r["dataset"] for r in in_case})
+            dot_figure(in_case, datasets, unbiased_only(runtime), "Gram time, s", f"Gram time, {case}",
+                       out/f"{prefix}_gram_time_{case}.png", xlog=True)
+
+
+def feature_time(record):
+    return record.get("feature_time_sec") if record.get("status") == "ok" else None
 
 
 def plot_gram_time(records, out, metric):
+    """Full Gram time of every method and, separately, GVoys/MCRWK feature time before the Gram."""
     rows = [r for r in records if r.get("name")]
     for case in cases(rows):
         in_case = [r for r in rows if r["case"] == case]
         datasets = sorted({r["dataset"] for r in in_case})
-        dot_figure(full_size(in_case), datasets, unbiased_only(runtime), "Gram time, s", f"Gram time, {case}",
+        dot_figure(in_case, datasets, unbiased_only(runtime), "Gram time, s", f"Gram time (full), {case}",
                    out/f"gram_time_{case}.png", xlog=True)
-        for dataset in datasets:
-            per_dataset = [r for r in in_case if r["dataset"] == dataset]
-            if len({r["n_graphs"] for r in per_dataset}) > 1:
-                line_figure(per_dataset, "n_graphs", "number of graphs", [("Gram time, s", unbiased_only(runtime), True, True)],
-                            f"Gram time vs dataset size, {dataset}, {case}",
-                            out/f"gram_time_vs_graphs_{dataset}_{case}.png", xlog=True)
+        dot_figure(in_case, datasets, unbiased_only(feature_time), "feature time, s",
+                   f"Feature construction before the Gram (GVoys, MCRWK), {case}",
+                   out/f"gram_time_features_{case}.png", xlog=True)
 
 
 # ----------------------------------------------------------------------
@@ -446,11 +445,90 @@ def plot_n(data, out, metric):
                     out/f"n_{dataset}_lambda{lmbd}.png", xlog=True, style_fn=n_style, order_fn=n_order)
 
 
+# ----------------------------------------------------------------------
+#  Convergence and bounds (one series per graph size N)
+# ----------------------------------------------------------------------
+GUIDE = "∝ m^(−1/2)"
+
+
+def size_of(name):
+    return int(name.split(" = ")[1].split(",")[0])
+
+
+def size_style(sizes):
+    """Blue ramp by N; bounds dotted and hollow in the color of their N; the slope guide muted."""
+    def style_fn(name, names):
+        if name == GUIDE:
+            return dict(color=MUTED, marker="", label=name, linestyle="-")
+        base = dict(color=ramp(sizes, size_of(name)), marker="o", label=name, linestyle="-")
+        return {**base, "linestyle": ":", "hollow": True} if name.endswith("bound") else base
+    return style_fn
+
+
+def size_order(names):
+    return sorted(names, key=lambda n: (n == GUIDE, 0 if n == GUIDE else size_of(n), n.endswith("bound")))
+
+
+def plot_convergence(data, out, metric):
+    records = data["records"]
+    for case, lmbd in sorted({(r["case"], r["lmbd"]) for r in records}, key=lambda k: (k[0] != "unlabeled", k[1])):
+        rows = [r for r in records if r["case"] == case and r["lmbd"] == lmbd]
+        sizes = sorted({r["n_nodes"] for r in rows})
+        smallest = sorted((r for r in rows if r["n_nodes"] == sizes[0]), key=lambda r: r["m"])
+        guide = [{"name": GUIDE, "m": r["m"], "rel_rmse": smallest[0]["rel_rmse"]*(r["m"]/smallest[0]["m"])**-0.5}
+                 for r in smallest]
+        series = [{**r, "name": f"N = {r['n_nodes']}"} for r in rows]
+        style_fn = size_style(sizes)
+        line_figure(series+guide, "m", "samples m",
+                    [("relative RMSE", lambda r: r.get("rel_rmse"), True, True),
+                     ("m · Var(k̂) / k² (median over pairs)", lambda r: r.get("m_rel_var_median"), True, True),
+                     ("variance bound / measured (median)", lambda r: r.get("variance_bound_ratio_median"), True, True)],
+                    f"Convergence, {case}, λ = {lmbd}", out/f"convergence_{case}_lambda{lmbd}.png",
+                    xlog=10, style_fn=style_fn, order_fn=size_order)
+        bound, bound_name = ("hoeffding", "Hoeffding (7)") if case == "unlabeled" else ("chebyshev", "Chebyshev (11)")
+        tails = []
+        for r in rows:
+            for t in r["tails"]:
+                tails.append({"name": f"N = {r['n_nodes']}", "m": r["m"], "eps": t["eps"], "value": t["empirical"]})
+                if t.get(bound) is not None:
+                    tails.append({"name": f"N = {r['n_nodes']}, bound", "m": r["m"], "eps": t["eps"],
+                                  "value": t[bound]})
+        epsilons = sorted({t["eps"] for t in tails})
+        line_figure(tails, "m", "samples m",
+                    [(f"P(|k̂ − k| > {eps:g}·k)", lambda r, e=eps: r["value"] if r["eps"] == e and r["value"] > 0
+                      else None, True, True) for eps in epsilons],
+                    f"Tail frequency against {bound_name}, {case}, λ = {lmbd}",
+                    out/f"convergence_tails_{case}_lambda{lmbd}.png", xlog=10, style_fn=style_fn, order_fn=size_order)
+    required_m_table(data["summaries"], out)
+
+
+def required_m_table(summaries, out):
+    """m needed for P(|k̂ − k| > eps k) <= delta: smallest grid m against the bound, as .md and .json."""
+    rows = [{"case": s["case"], "lambda": s["lmbd"], "N": s["n_nodes"], "slope": s["slope"], **r,
+             "bound_over_empirical": r["m_bound_median"]/r["m_empirical"]
+             if r["m_bound_median"] is not None and r["m_empirical"] else None}
+            for s in summaries for r in s["required_m"]]
+    fmt = lambda v: "—" if v is None else f"{v:.3g}"
+    lines = ["### m needed for P(|k̂ − k| > ε·k) ≤ δ: smallest grid m against the bound (median over pairs)", "",
+             "| case | λ | N | slope | ε | δ | m, empirical | m, bound | bound / empirical | bound |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        empirical = r["m_empirical"] if r["m_empirical"] is not None else f"> {r['m_grid_max']}"
+        lines.append(f"| {r['case']} | {r['lambda']:g} | {r['N']} | {fmt(r['slope'])} | {r['eps']:g} | {r['delta']:g} | "
+                     f"{empirical} | {fmt(r['m_bound_median'])} | {fmt(r['bound_over_empirical'])} | {r['bound']} |")
+    out.mkdir(parents=True, exist_ok=True)
+    (out/"convergence_required_m.md").write_text("\n".join(lines)+"\n")
+    (out/"convergence_required_m.json").write_text(json.dumps(rows, indent=2, allow_nan=False)+"\n")
+    print(f"wrote {out/'convergence_required_m.md'} (+ .json)")
+
+
 PLOTS = {"scaling": lambda d, o, m: plot_scaling(d["records"], o, m),
          "tu_svm": lambda d, o, m: plot_tu_svm(d["records"], o, m),
          "gram_time": lambda d, o, m: plot_gram_time(d["records"], o, m),
          "lambda_sweep": lambda d, o, m: plot_lambda(d["records"], o, m),
-         "q_sampling": plot_q, "n_sampling": plot_n}
+         "q_sampling": plot_q, "n_sampling": plot_n, "convergence": plot_convergence,
+         "ridge": lambda d, o, m: plot_tu_svm(d["records"], o, m, prefix="ridge",
+                                              models=("kernel ridge on Gram", "ridge on features"), gram_time=False)}
 
 
 def main(argv=None):

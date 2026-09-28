@@ -90,7 +90,8 @@ def add_kernel_arguments(parser, *, gvoys_samples, output_dir, mc_diagonals=("un
     option(parser,"max_iter",type=int,default=5000)
     option(parser,"direct_max_nodes",type=int,default=DIRECT_NODE_LIMIT,
            help="Skip direct at or above this vertex count (hard cap 128, as in src.benchmark).")
-    option(parser,"sylvester_max_nodes",type=int,default=1024)
+    option(parser,"sylvester_max_nodes",type=int,default=512,
+           help="Skip Sylvester (unlabeled only) above this vertex count.")
     option(parser,"seed",type=int,default=42)
     option(parser,"experiment_name",default="run")
     option(parser,"output",help="Exact JSON path; default is <output-dir>/<experiment-name>_<UTC stamp>.json.")
@@ -234,8 +235,10 @@ def compute_methods(runs, Ps, vs, ws, config, labeled, seed, *, max_nodes, args,
     """
     if config.kind == "geom" and max_nodes >= CG_REFERENCE_MIN_NODES and "cg" not in {r["method"] for r in runs}:
         runs = runs+[{"name": "cg", "method": "cg", "variant": None, "reference_only": True}]
-    svm = getattr(args, "svm", ("kernel",))
-    grams_needed = "kernel" in svm or args.check_psd or any(r["method"] in EXACT_METHODS for r in runs)
+    # SVM (--svm) and ridge (--ridge) scripts list their models; the others always need Grams.
+    models = set(getattr(args, "svm", ())) | set(getattr(args, "ridge", ()))
+    grams_needed = (not models or "kernel" in models or args.check_psd
+                    or any(r["method"] in EXACT_METHODS for r in runs))
     matrices, features, records = {}, {}, []
     for run in runs:
         diagonals = args.mc_diagonals if run["method"] == "mc" else [None]
