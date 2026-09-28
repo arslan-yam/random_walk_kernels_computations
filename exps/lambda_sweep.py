@@ -55,7 +55,8 @@ def run_tu(args, payload, path):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    common.add_kernel_arguments(parser, gvoys_samples=100, output_dir="results/exps/lambda_sweep")
+    common.add_kernel_arguments(parser, gvoys_samples=100, output_dir="results/exps/lambda_sweep",
+                                mc_diagonals=("unbiased", "biased"))
     option(parser,"settings",nargs="+",choices=SETTINGS,default=list(SETTINGS))
     option(parser,"lambdas",type=float,nargs="+",default=[round(0.1*i,1) for i in range(1,10)])
     add_graph_arguments(parser)

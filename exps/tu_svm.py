@@ -21,7 +21,6 @@ Quick check:
 import argparse
 from pathlib import Path
 import sys
-import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -55,24 +54,24 @@ def run_dataset(name, graphs, y, task, args, config, labeled, c, *, seed, evalua
     Ps, vs, ws, input_time = common.timed_inputs(graphs, args.u_w_distribution, labeled, args.seed)
     sizes = [len(g) for g in graphs]
     runs = common.expand_methods(args.methods, float(np.mean(sizes)), args.mc_fixed_m, c)
-    records, matrices = common.compute_methods(runs, Ps, vs, ws, config, labeled, seed,
-                                               max_nodes=max(sizes), args=args, tag=tag)
+    records, matrices, features = common.compute_methods(runs, Ps, vs, ws, config, labeled, seed,
+                                                         max_nodes=max(sizes), args=args, tag=tag)
     for record in records:
-        K = matrices.get(record["name"])
-        if not evaluate or K is None:
+        if not evaluate or record["status"] != "ok":
             continue
-        t0 = time.perf_counter()
         try:
-            record["evaluation"] = common.evaluate(K, y, task, args, seed)
-            record["eval_time_sec"] = time.perf_counter()-t0
-            record["n_folds"] = len(record["evaluation"].get("scores") or record["evaluation"]["fold_scores"]["rmse"])
+            common.evaluate_record(record, matrices.get(record["name"]), features.get(record["name"]),
+                                   y, task, args, seed)
+            evaluation = record.get("evaluation") or record.get("evaluation_linear") or {}
+            if evaluation:
+                record["n_folds"] = len(evaluation.get("scores") or evaluation["fold_scores"]["rmse"])
         except Exception as exc:
             record.update(status="failed", error=f"{task}: {exc}")
             if args.fail_fast:
                 raise
     stats = {"dataset": name, "task": task, "labeled": labeled, "lmbd": config.lmbd,
              "input_time_sec": input_time, **common.graph_stats(graphs, labeled)}
-    return [{**stats, **record} for record in records], matrices
+    return [{**stats, **record} for record in records], matrices, features
 
 
 def run_datasets(args, payload, path, config, *, evaluate, extra=None):
@@ -94,13 +93,16 @@ def run_datasets(args, payload, path, config, *, evaluate, extra=None):
                 if calibration:
                     payload["calibrations"].append({**extra, "dataset": name, "case": case,
                                                     "lmbd": config.lmbd, **calibration})
-                rows, matrices = run_dataset(name, graphs, y, task, args, config, labeled, c,
-                                             seed=args.seed, evaluate=evaluate, tag=f"[{name} {case}]")
+                rows, matrices, features = run_dataset(name, graphs, y, task, args, config, labeled, c,
+                                                       seed=args.seed, evaluate=evaluate, tag=f"[{name} {case}]")
                 payload["records"] += [{**extra, "case": case, **row} for row in rows]
                 if getattr(args, "save_grams", False):
                     for method, K in matrices.items():
                         np.savez_compressed(path.with_name(f"{path.stem}_{name}_{case}_{method}.npz"),
                                             raw=K, indices=indices, y=y)
+                    for method, X in features.items():
+                        np.savez_compressed(path.with_name(f"{path.stem}_{name}_{case}_{method}_features.npz"),
+                                            features=X, indices=indices, y=y)
             except Exception as exc:
                 print(f"  failed: {exc}", flush=True)
                 payload["records"].append({**extra, "dataset": name, "case": case, "status": "failed",
@@ -113,10 +115,12 @@ def run_datasets(args, payload, path, config, *, evaluate, extra=None):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    common.add_kernel_arguments(parser, gvoys_samples=200, output_dir="results/exps/tu_svm")
+    common.add_kernel_arguments(parser, gvoys_samples=200, output_dir="results/exps/tu_svm",
+                                mc_diagonals=("unbiased", "biased"))
     common.add_tu_arguments(parser, datasets=common.CLASSIFICATION_DATASETS+common.REGRESSION_DATASETS)
     common.add_evaluation_arguments(parser)
-    option(parser,"save_grams",action="store_true",help="Save raw Gram matrices as NPZ next to the JSON.")
+    option(parser,"save_grams",action="store_true",
+           help="Save raw Gram matrices (and linear-model features) as NPZ next to the JSON.")
     args = parser.parse_args(argv)
     common.validate_kernel_arguments(parser, args)
     if args.n_splits < 2 or args.inner_splits < 2 or args.n_cv_repeats < 1 or args.calibration_graphs < 1:

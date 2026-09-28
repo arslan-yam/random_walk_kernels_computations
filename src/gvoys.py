@@ -119,7 +119,8 @@ def _feature(graph, shared, seed, graph_id, walk_id, kind, lam, p_halt, anchor_f
 
 def _dataset(Ps, vs, ws, *, labeled, anchor_fraction, kind, lambda_coeff,
              p_halt, nb_random_walks, block_size, seed, max_walk_length=None,
-             base_nb_walk_index=0):
+             base_nb_walk_index=0, return_features=False):
+    """Gram F F^T / samples, or with return_features the scaled features F / sqrt(samples)."""
     kind = _kind(kind)
     lam = kernel_parameter(kind, lambda k: lambda_coeff**k / (math.factorial(k) if kind == "exp" else 1))
     samples = positive_int(nb_random_walks, "nb_random_walks")
@@ -136,6 +137,7 @@ def _dataset(Ps, vs, ws, *, labeled, anchor_fraction, kind, lambda_coeff,
     graphs = [_prepare(P,v,w,labeled) for P,v,w in zip(Ps,vs,ws)]
     labels = sorted(set().union(*(P.keys() for P in Ps))) if labeled else []
     result = np.zeros((len(graphs), len(graphs)))
+    blocks = []
     for offset in range(0, samples, block_size):
         size = min(block_size, samples-offset)
         features = np.empty((len(graphs), size))
@@ -145,8 +147,12 @@ def _dataset(Ps, vs, ws, *, labeled, anchor_fraction, kind, lambda_coeff,
             for g, graph in enumerate(graphs):
                 features[g,j] = _feature(graph, shared, seed, g, walk_id,
                                         kind, lam, p_halt, anchor_fraction)
-        if graphs:
+        if return_features:
+            blocks.append(features)
+        elif graphs:
             result += (features @ features.T) / samples
+    if return_features:
+        result = np.hstack(blocks) / math.sqrt(samples)
     if not np.isfinite(result).all():
         raise FloatingPointError("non-finite GVoys estimate; reduce weight variance")
     return result
@@ -164,6 +170,18 @@ def random_walk_kernel_gvoys_dataset(Ps, vs, ws, anchor_fraction=1., kind="exp",
     return _dataset(Ps,vs,ws,labeled=False,anchor_fraction=anchor_fraction,kind=kind,
         lambda_coeff=lambda_coeff,p_halt=p_halt,nb_random_walks=nb_random_walks,
         block_size=block_size,seed=seed,max_walk_length=max_walk_length)
+
+
+def random_walk_kernel_gvoys_features(Ps, vs, ws, labeled=False, anchor_fraction=1., kind="exp",
+        lambda_coeff=LAMBDA_COEFF, p_halt=P_HALT, nb_random_walks=NB_RANDOM_WALKS,
+        seed=42, block_size=64, max_walk_length=None):
+    """Features X (graphs x samples) of the same walks as the dataset Gram: X X^T = Gram.
+
+    Linear models on X avoid the graphs x graphs matrix entirely.
+    """
+    return _dataset(Ps,vs,ws,labeled=labeled,anchor_fraction=anchor_fraction,kind=kind,
+        lambda_coeff=lambda_coeff,p_halt=p_halt,nb_random_walks=nb_random_walks,
+        block_size=block_size,seed=seed,max_walk_length=max_walk_length,return_features=True)
 
 
 def random_walk_kernel_gvoys_labeled_dataset(Ps_labeled, vs, ws, anchor_fraction=1.,

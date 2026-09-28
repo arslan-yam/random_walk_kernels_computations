@@ -36,22 +36,36 @@ plt.rcParams.update({"font.family": "sans-serif", "font.size": 9, "axes.edgecolo
                      "legend.frameon": False, "savefig.dpi": 200, "savefig.bbox": "tight"})
 
 
+def marker_colors(st):
+    """Filled markers with a white ring, or hollow markers in the series color."""
+    return dict(markerfacecolor="white", markeredgecolor=st["color"]) if st.get("hollow") \
+        else dict(markerfacecolor=st["color"], markeredgecolor="white")
+
+
 def fixed_m(name):
     return int(name.split("=")[1]) if name.startswith("mc_m=") else None
 
 
+BIASED = "_biased"
+
+
 def method_order(names):
-    fixed = sorted(n for n in names if fixed_m(n) is not None)
-    fixed.sort(key=fixed_m)
-    known = [n for n in ["mc_cN", *fixed, "gvoys", "cg", "fixed_point", "sylvester", "direct"] if n in names]
+    fixed = sorted({n.removesuffix(BIASED) for n in names if fixed_m(n.removesuffix(BIASED)) is not None},
+                   key=lambda n: fixed_m(n))
+    base = ["mc_cN", *fixed, "gvoys", "cg", "fixed_point", "sylvester", "direct"]
+    known = [n for b in base for n in (b, b+BIASED) if n in names]
     return known+sorted(set(names)-set(known))
 
 
 def style(name, names):
+    """Line/marker style; the biased-diagonal MCRWK twin is hollow and dotted."""
+    if name.endswith(BIASED):
+        base = style(name.removesuffix(BIASED), [n.removesuffix(BIASED) for n in names])
+        return {**base, "label": base["label"]+", biased diag", "linestyle": ":", "hollow": True}
     if name in STYLE:
         color, marker, label = STYLE[name]
         return dict(color=color, marker=marker, label=label, linestyle="-")
-    fixed = sorted({fixed_m(n) for n in names if fixed_m(n) is not None})
+    fixed = sorted({fixed_m(n.removesuffix(BIASED)) for n in names if fixed_m(n.removesuffix(BIASED)) is not None})
     if name.startswith("mc_m="):
         m = fixed_m(name)
         step = np.linspace(0, len(MC_RAMP)-1, len(fixed)).round().astype(int)[fixed.index(m)] if len(fixed) > 1 else 2
@@ -63,11 +77,18 @@ def style(name, names):
 #  Record access and aggregation
 # ----------------------------------------------------------------------
 def load(paths):
-    by_experiment = defaultdict(list)
+    """Merge records (and q/n aggregates and references) per experiment."""
+    by_experiment = defaultdict(lambda: defaultdict(list))
     for path in paths:
         payload = json.loads(Path(path).read_text())
-        by_experiment[payload["experiment"]] += payload["records"]
+        for key in ("records", "aggregates", "references"):
+            by_experiment[payload["experiment"]][key] += payload.get(key, [])
     return by_experiment
+
+
+def unbiased_only(value):
+    """Both MCRWK diagonals share walks and time; plot the biased twin only for its own metrics."""
+    return lambda record: None if record.get("name", "").endswith(BIASED) else value(record)
 
 
 def runtime(record):
@@ -78,8 +99,9 @@ def error(metric):
     return lambda record: (record.get("errors") or {}).get(metric)
 
 
-def evaluation(key):
-    return lambda record: (record.get("evaluation") or {}).get(key) if record.get("status") == "ok" else None
+def evaluation(key, field="evaluation"):
+    """Kernel-SVM result by default; field="evaluation_linear" for the linear SVM on features."""
+    return lambda record: (record.get(field) or {}).get(key) if record.get("status") == "ok" else None
 
 
 def summarize(records, keys, value):
@@ -108,9 +130,10 @@ def table(title, rows, columns, cells, fmt="{:.3g}"):
 
 
 def log_axis(axis, set_scale):
-    """Log scale labelled at 1-2-5 steps in plain notation."""
+    """Log scale in plain notation: 1-2-5 steps over short ranges, decades otherwise."""
     set_scale("log")
-    axis.set_major_locator(ticker.LogLocator(subs=(1, 2, 5)))
+    low, high = axis.get_view_interval()
+    axis.set_major_locator(ticker.LogLocator(subs=(1, 2, 5) if high <= 30*low else (1,)))
     axis.set_major_formatter(ticker.FuncFormatter(lambda value, _: f"{value:g}"))
     axis.set_minor_formatter(ticker.NullFormatter())
 
@@ -128,9 +151,9 @@ def finish(ax, xlabel, ylabel, xlog=False, ylog=False):
 # ----------------------------------------------------------------------
 #  Line figures: metric versus graph size or lambda
 # ----------------------------------------------------------------------
-def line_figure(records, x_key, xlabel, panels, title, path, *, xlog):
+def line_figure(records, x_key, xlabel, panels, title, path, *, xlog, style_fn=style, order_fn=method_order):
     """panels: (ylabel, value function, log scale, include exact methods)."""
-    names = method_order({r["name"] for r in records if r.get("name")})
+    names = order_fn({r["name"] for r in records if r.get("name")})
     fig, axes = plt.subplots(1, len(panels), figsize=(4.2*len(panels), 3.4), squeeze=False)
     tables = []
     for ax, (ylabel, value, ylog, with_exact) in zip(axes[0], panels):
@@ -143,10 +166,10 @@ def line_figure(records, x_key, xlabel, panels, title, path, *, xlog):
             if not points:
                 continue
             x, mean, std = map(np.asarray, zip(*points))
-            st = style(name, names)
+            st = style_fn(name, names)
             ax.errorbar(x, mean, yerr=std, color=st["color"], marker=st["marker"], linestyle=st["linestyle"],
                         label=st["label"], linewidth=2, markersize=6, capsize=2, elinewidth=1,
-                        markeredgecolor="white", markeredgewidth=1, zorder=3+len(shown)-rank)
+                        markeredgewidth=1, zorder=3+len(shown)-rank, **marker_colors(st))
         finish(ax, xlabel, ylabel, xlog, ylog)
         tables.append((f"{title}: {ylabel}", shown, xs, cells))
     handles = {}
@@ -181,7 +204,8 @@ def plot_scaling(records, out, metric):
     for case in cases(records):
         rows = [r for r in records if r.get("case") == case]
         line_figure(rows, "n_nodes", "vertices per graph N",
-                    [("runtime, s", runtime, True, True), ("relative error", error(metric), True, False)],
+                    [("runtime, s", unbiased_only(runtime), True, True),
+                     ("relative error", unbiased_only(error(metric)), True, False)],
                     f"Scaling, {case}", out/f"scaling_{case}.png", xlog=True)
 
 
@@ -189,8 +213,8 @@ def plot_lambda(records, out, metric):
     synthetic = [r for r in records if r.get("setting") == "synthetic"]
     for case in cases(synthetic):
         rows = [r for r in synthetic if r.get("case") == case]
-        line_figure(rows, "lmbd", "λ", [("runtime, s", runtime, True, True),
-                    ("relative error", error(metric), True, False)],
+        line_figure(rows, "lmbd", "λ", [("runtime, s", unbiased_only(runtime), True, True),
+                    ("relative error", unbiased_only(error(metric)), True, False)],
                     f"λ sweep, synthetic, {case}", out/f"lambda_synthetic_{case}.png", xlog=False)
     tu = [r for r in records if r.get("setting") == "tu" and r.get("name")]
     for dataset in sorted({r["dataset"] for r in tu}):
@@ -198,10 +222,12 @@ def plot_lambda(records, out, metric):
             rows = [r for r in tu if r["dataset"] == dataset and r["case"] == case]
             if not rows:
                 continue
-            quality = ("accuracy", evaluation("mean_accuracy"), False, True) if rows[0]["task"] == "classification" \
-                else ("RMSE", evaluation("mean_rmse"), False, True)
-            line_figure(rows, "lmbd", "λ", [("Gram time, s", runtime, True, True), quality,
-                        ("relative error", error(metric), True, False)],
+            key, label = ("mean_accuracy", "accuracy") if rows[0]["task"] == "classification" else ("mean_rmse", "RMSE")
+            quality = [(f"{label}, SVC", evaluation(key), False, True)]
+            if any(r.get("evaluation_linear") for r in rows):
+                quality.append((f"{label}, linear SVM", evaluation(key, "evaluation_linear"), False, True))
+            line_figure(rows, "lmbd", "λ", [("Gram time, s", unbiased_only(runtime), True, True), *quality,
+                        ("relative error", unbiased_only(error(metric)), True, False)],
                         f"λ sweep, {dataset}, {case}", out/f"lambda_{dataset}_{case}.png", xlog=False)
 
 
@@ -223,7 +249,7 @@ def dot_figure(records, datasets, value, xlabel, title, path, *, xlog, xerr=None
             err = spread.get((name, dataset), (None,))[0] if xerr else (std if n > 1 else None)
             st = style(name, names)
             ax.errorbar([mean], [y], xerr=None if err is None else [err], color=st["color"], marker=st["marker"],
-                        markersize=7, capsize=2, elinewidth=1, markeredgecolor="white", markeredgewidth=1)
+                        markersize=7, capsize=2, elinewidth=1, markeredgewidth=1, **marker_colors(st))
         ax.set_title(dataset, fontsize=9)
         ax.set_yticks(range(len(names)), [style(n, names)["label"] for n in names])
         ax.set_ylim(len(names)-0.5, -0.5)
@@ -251,11 +277,16 @@ def plot_tu_svm(records, out, metric):
                                          ("regression", "mean_rmse", "std_rmse", "RMSE")]:
             subset = [r for r in in_case if r["task"] == task]
             datasets = sorted({r["dataset"] for r in subset})
-            if datasets:
-                dot_figure(subset, datasets, evaluation(key), f"{label} (± fold std)", f"SVM {task}, {case}",
-                           out/f"tu_{task}_{case}.png", xlog=False, xerr=evaluation(spread))
+            # SVC on every Gram (one classifier: compare methods) and, separately,
+            # the linear SVM on features of GVoys and the biased MCRWK diagonal.
+            for field, model, suffix in (("evaluation", "SVC on Gram", ""),
+                                         ("evaluation_linear", "linear SVM on features", "_linear")):
+                if any(r.get(field) for r in subset):
+                    dot_figure(subset, datasets, evaluation(key, field), f"{label} (± fold std)",
+                               f"{task}, {model}, {case}", out/f"tu_{task}{suffix}_{case}.png",
+                               xlog=False, xerr=evaluation(spread, field))
         datasets = sorted({r["dataset"] for r in in_case})
-        dot_figure(in_case, datasets, runtime, "Gram time, s", f"Gram time, {case}",
+        dot_figure(in_case, datasets, unbiased_only(runtime), "Gram time, s", f"Gram time, {case}",
                    out/f"tu_gram_time_{case}.png", xlog=True)
 
 
@@ -264,17 +295,162 @@ def plot_gram_time(records, out, metric):
     for case in cases(rows):
         in_case = [r for r in rows if r["case"] == case]
         datasets = sorted({r["dataset"] for r in in_case})
-        dot_figure(full_size(in_case), datasets, runtime, "Gram time, s", f"Gram time, {case}",
+        dot_figure(full_size(in_case), datasets, unbiased_only(runtime), "Gram time, s", f"Gram time, {case}",
                    out/f"gram_time_{case}.png", xlog=True)
         for dataset in datasets:
             per_dataset = [r for r in in_case if r["dataset"] == dataset]
             if len({r["n_graphs"] for r in per_dataset}) > 1:
-                line_figure(per_dataset, "n_graphs", "number of graphs", [("Gram time, s", runtime, True, True)],
+                line_figure(per_dataset, "n_graphs", "number of graphs", [("Gram time, s", unbiased_only(runtime), True, True)],
                             f"Gram time vs dataset size, {dataset}, {case}",
                             out/f"gram_time_vs_graphs_{dataset}_{case}.png", xlog=True)
 
 
-PLOTS = {"scaling": plot_scaling, "tu_svm": plot_tu_svm, "gram_time": plot_gram_time, "lambda_sweep": plot_lambda}
+# ----------------------------------------------------------------------
+#  Proposal q and label sequences per length n (aggregates over seeds)
+# ----------------------------------------------------------------------
+def proposal_label(row):
+    if row["proposal"] == "gvoys":
+        return "GVoys"
+    return row["proposal"]+(f" (ε={row['mix_eps']:g})" if row.get("mix_eps") else "")
+
+
+def ramp(values, value):
+    """Ordinal blue step for value among sorted values (light = small)."""
+    values = sorted(values)
+    if len(values) == 1:
+        return MC_RAMP[2]
+    return MC_RAMP[int(round(values.index(value)*(len(MC_RAMP)-1)/(len(values)-1)))]
+
+
+QUALITY_LABELS = {"": "SVC, unbiased diag / GVoys", "_biased": "SVC, biased diag",
+                  "_linear": "linear SVM on features"}
+
+
+def quality_panel(task, suffix=""):
+    """Evaluation panel over seeds: "" and "_biased" are SVC on the Gram, "_linear" the linear SVM."""
+    key, name = ("mean_accuracy", "accuracy") if task == "classification" else ("mean_rmse", "RMSE")
+    label = f"{name}, {QUALITY_LABELS[suffix]} (± std over seeds)"
+    return (f"{key}{suffix}_over_seeds", label, False, f"{key}{suffix}_std_over_seeds", key)
+
+
+def with_linear(row):
+    """One linear-SVM field per row: biased MCRWK features, or GVoys features."""
+    out = dict(row)
+    for key in ("mean_accuracy", "mean_rmse"):
+        for stat in ("", "_std"):
+            value = row.get(f"{key}_biased_linear{stat}_over_seeds", row.get(f"{key}_linear{stat}_over_seeds"))
+            if value is not None:
+                out[f"{key}_linear{stat}_over_seeds"] = value
+    return out
+
+
+def proposal_figure(rows, panels, title, path, reference=None):
+    """Proposals on the y axis, one dot per budget m (blue ramp), GVoys as its own row.
+
+    panels: (key, label, log scale, std key or None, reference evaluation key or None).
+    """
+    labels = list(dict.fromkeys(proposal_label(r) for r in rows))
+    ms = sorted({r["m"] for r in rows if r.get("m")})
+    series = [f"m = {m:,}" for m in ms]+(["GVoys"] if "GVoys" in labels else [])
+    fig, axes = plt.subplots(1, len(panels), figsize=(3.1*len(panels)+1.4, 0.34*len(labels)+1.6),
+                             sharey=True, squeeze=False)
+    tables = []
+    for ax, (key, xlabel, xlog, std_key, ref_key) in zip(axes[0], panels):
+        cells = {}
+        for row in rows:
+            value = row.get(key)
+            if value is None or (xlog and value <= 0):
+                continue
+            label, m = proposal_label(row), row.get("m")
+            name = f"m = {m:,}" if m else "GVoys"
+            offset = (ms.index(m)-(len(ms)-1)/2)*0.18 if m else 0.
+            color, marker = (ramp(ms, m), "o") if m else (STYLE["gvoys"][0], "s")
+            std = row.get(std_key) if std_key else None
+            ax.errorbar([value], [labels.index(label)+offset], xerr=None if not std else [std], color=color,
+                        marker=marker, linestyle="none", markersize=6, capsize=2, elinewidth=1,
+                        markeredgecolor="white", markeredgewidth=1, label=name)
+            cells[label, name] = (value, std or 0., 1)
+        if ref_key and reference and ref_key in (reference.get("evaluation") or {}):
+            ax.axvline(reference["evaluation"][ref_key], color=MUTED, linewidth=1, label="exact kernel")
+        ax.set_yticks(range(len(labels)), labels)
+        ax.set_ylim(len(labels)-0.5, -0.5)
+        finish(ax, xlabel, "")
+        if xlog:
+            log_axis(ax.xaxis, ax.set_xscale)
+        tables.append((f"{title}: {xlabel}", labels, series, cells))
+    handles = {}
+    for ax in axes[0]:
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            handles.setdefault(l, h)
+    fig.suptitle(title, fontsize=10)
+    fig.tight_layout()
+    fig.legend(handles.values(), handles.keys(), loc="upper center", ncol=min(5, len(handles)),
+               bbox_to_anchor=(0.5, 0.0))
+    save(fig, path, tables)
+
+
+def reference_for(references, dataset, lmbd):
+    return next((r for r in references if r.get("dataset") == dataset and r.get("lmbd") == lmbd
+                 and r.get("status") == "ok"), None)
+
+
+def plot_q(data, out, metric):
+    aggregates = data["aggregates"]
+    for dataset, lmbd in sorted({(a["dataset"], a["lmbd"]) for a in aggregates}):
+        rows = [a for a in aggregates if a["dataset"] == dataset and a["lmbd"] == lmbd]
+        panels = [("rel_mse", "relative MSE over seeds", True, None, None),
+                  ("time_mean", "Gram time, s", True, "time_std", None),
+                  ("mse_x_time", "relative MSE × time", True, None, None),
+                  ("killed_fraction", "killed walks", False, None, None)]
+        proposal_figure(rows, panels, f"Proposal q, {dataset}, λ = {lmbd}", out/f"q_{dataset}_lambda{lmbd}.png")
+        task, rows = rows[0]["task"], [with_linear(r) for r in rows]
+        svm = [panel for panel in (quality_panel(task), quality_panel(task, "_biased"), quality_panel(task, "_linear"),
+                                   ("ridge_rel", "ridge of biased diag, τ / K_ii", False, None, None))
+               if any(r.get(panel[0]) is not None for r in rows)]
+        if svm:
+            proposal_figure(rows, svm, f"Proposal q, SVM, {dataset}, λ = {lmbd}",
+                            out/f"q_svm_{dataset}_lambda{lmbd}.png", reference_for(data["references"], dataset, lmbd))
+
+
+def n_series(row):
+    return f"B = {row['budget']:,} (fixed budget)" if row["design"] == "fixed_budget" \
+        else f"m = {row['lengths']:,} (fixed lengths)"
+
+
+def n_order(names):
+    """Fixed-budget series by budget, then fixed-length series by m."""
+    return sorted(names, key=lambda n: ("fixed lengths" in n, int(n.split()[2].replace(",", ""))))
+
+
+def n_style(name, names):
+    budgets = sorted(int(n.split()[2].replace(",", "")) for n in names if "fixed budget" in n)
+    if "fixed budget" in name:
+        return dict(color=ramp(budgets, int(name.split()[2].replace(",", ""))), marker="o",
+                    label=name, linestyle="-")
+    return dict(color=STYLE["mc_cN"][0], marker="s", label=name, linestyle="--")
+
+
+def plot_n(data, out, metric):
+    aggregates = [{**a, "name": n_series(a)} for a in data["aggregates"]]
+    for dataset, lmbd in sorted({(a["dataset"], a["lmbd"]) for a in aggregates}):
+        rows = [a for a in aggregates if a["dataset"] == dataset and a["lmbd"] == lmbd]
+        rows = [with_linear(r) for r in rows]
+        quality = [(label.split(" (")[0], lambda r, key=key: r.get(key), False, True)
+                   for key, label, *_ in (quality_panel(rows[0]["task"], suffix) for suffix in QUALITY_LABELS)
+                   if any(r.get(key) is not None for r in rows)]
+        line_figure(rows, "n", "label sequences per length n",
+                    [("pair variance", lambda r: r.get("var_offdiag"), True, True),
+                     ("relative MSE", lambda r: r.get("rel_mse"), True, True),
+                     ("Gram time, s", lambda r: r.get("time_mean"), True, True), *quality],
+                    f"Label sequences per length, {dataset}, λ = {lmbd}",
+                    out/f"n_{dataset}_lambda{lmbd}.png", xlog=True, style_fn=n_style, order_fn=n_order)
+
+
+PLOTS = {"scaling": lambda d, o, m: plot_scaling(d["records"], o, m),
+         "tu_svm": lambda d, o, m: plot_tu_svm(d["records"], o, m),
+         "gram_time": lambda d, o, m: plot_gram_time(d["records"], o, m),
+         "lambda_sweep": lambda d, o, m: plot_lambda(d["records"], o, m),
+         "q_sampling": plot_q, "n_sampling": plot_n}
 
 
 def main(argv=None):
@@ -284,8 +460,8 @@ def main(argv=None):
     parser.add_argument("--error-metric", default="offdiagonal_mean_rel",
                         help="Key of src.gram.matrix_errors, e.g. mean_rel or relative_frobenius.")
     args = parser.parse_args(argv)
-    for experiment, records in load(args.results).items():
-        PLOTS[experiment](records, Path(args.out_dir), args.error_metric)
+    for experiment, data in load(args.results).items():
+        PLOTS[experiment](data, Path(args.out_dir), args.error_metric)
 
 
 if __name__ == "__main__":

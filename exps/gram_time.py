@@ -65,7 +65,7 @@ def main(argv=None):
                     subset, subset_y = (graphs, y) if n_graphs == len(graphs) else \
                         common.select_subset(graphs, y, task, n_graphs, seed=args.seed)[:2]
                     for repeat in range(args.n_repeats):
-                        rows, _ = run_dataset(name, subset, subset_y, task, args, config, labeled, c,
+                        rows, _, _ = run_dataset(name, subset, subset_y, task, args, config, labeled, c,
                                               seed=args.seed+repeat, evaluate=False,
                                               tag=f"[{name} {case} graphs={n_graphs} r={repeat}]")
                         payload["records"] += [{"case": case, "repeat": repeat, **row} for row in rows]

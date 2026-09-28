@@ -32,6 +32,7 @@ class KernelConfig:
     n_label_samples_per_length: int = 1
     n_walk_reps: int = 1
     q_sampling_kind: str = "uniform"
+    mc_diagonal: str = "unbiased"
     p_halt: float = 0.2
     anchor_fraction: float = 1.0
     block_size: int = 64
@@ -53,6 +54,8 @@ class KernelConfig:
             raise ValueError("solver_tol must be between 0 and 1")
         if self.q_sampling_kind not in {"uniform","random","norm_fro","norm_l1"}:
             raise ValueError("unknown label proposal")
+        if self.mc_diagonal not in {"unbiased","biased"}:
+            raise ValueError("mc_diagonal must be unbiased or biased")
         return self
 
     @property
@@ -92,8 +95,10 @@ def compute_kernel(method, Ps,vs,ws,config,seed=42,labeled=False):
         if labeled:
             return mcrwk.random_walk_kernel_mc_labeled_dataset(Ps,vs,ws,mu,config.kind,
                 n_length_samples=config.lengths,n_label_samples_per_length=config.n_label_samples_per_length,
-                n_walk_reps=config.n_walk_reps,q_sampling_kind=config.q_sampling_kind,seed=seed)
-        return mcrwk.random_walk_kernel_mc_dataset(Ps,vs,ws,mu,config.kind,config.n_samples_mc,seed)
+                n_walk_reps=config.n_walk_reps,q_sampling_kind=config.q_sampling_kind,seed=seed,
+                diagonal=config.mc_diagonal)
+        return mcrwk.random_walk_kernel_mc_dataset(Ps,vs,ws,mu,config.kind,config.n_samples_mc,seed,
+                                                   diagonal=config.mc_diagonal)
     raise ValueError(f"unknown method: {method}")
 
 
@@ -113,6 +118,8 @@ def add_kernel_arguments(parser,default_mc=200):
     option(parser,"n_label_samples_per_length",type=int,default=1)
     option(parser,"n_walk_reps",type=int,default=1,help="Walks averaged inside EACH labeled replica.")
     option(parser,"q_sampling_kind",choices=["uniform","norm_fro","norm_l1","random"],default="uniform")
+    option(parser,"mc_diagonal",choices=["unbiased","biased"],default="unbiased",
+           help="MC diagonal: replica cross product (unbiased) or averaged-feature square (biased, PSD).")
     option(parser,"p_halt",type=float,default=0.2)
     option(parser,"anchor_fraction",type=float,default=1.)
     option(parser,"block_size",type=int,default=64,help="GVoys temporary feature block; incomplete final blocks are supported.")
@@ -217,6 +224,7 @@ def runtime_metadata():
             "networkx":nx.__version__,"scikit_learn":version("scikit-learn"),
             "platform":platform.platform(),"source_sha256":digest.hexdigest(),
             "target":"row_normalized_P","diagonal":"method_specific",
-            "diagonal_by_method":{"mc":"independent_replica_cross_product",
+            "diagonal_by_method":{"mc":"independent_replica_cross_product (kernel.mc_diagonal=unbiased) "
+                                       "or averaged_feature_square (biased)",
                                   "gvoys":"feature_square"},
             "threads":{k:os.environ.get(k) for k in ("OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","MKL_NUM_THREADS")}}

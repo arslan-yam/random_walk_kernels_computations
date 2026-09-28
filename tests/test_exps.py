@@ -87,10 +87,25 @@ class ExpsTests(unittest.TestCase):
             records = json.loads(output.read_text())["records"]
             self.assertEqual({(r["dataset"], r["task"]) for r in records},
                              {("TOYC", "classification"), ("TOYR", "regression")})
+            by_name = {(r["dataset"], r["case"], r["name"]): r for r in records}
+            for (dataset, case, name), record in by_name.items():
+                if name.endswith("_biased"):
+                    # Same walks and the same timings; both diagonals are timed up to their Gram.
+                    twin = by_name[dataset, case, name.removesuffix("_biased")]
+                    self.assertEqual(record["diagonal"], "biased")
+                    for key in ("feature_time_sec", "gram_build_sec", "time_sec", "time_basis"):
+                        self.assertEqual(record[key], twin[key])
+            self.assertIn(("TOYC", "labeled", "mc_cN_biased"), by_name)
             for record in records:
                 self.assertEqual(record["status"], "ok", record)
                 key = "mean_accuracy" if record["task"] == "classification" else "mean_rmse"
+                # SVC on the Gram for every method; linear SVM only where features exist.
                 self.assertIn(key, record["evaluation"])
+                has_features = record["name"] == "gvoys" or record["name"].endswith("_biased")
+                self.assertEqual("evaluation_linear" in record, has_features, record["name"])
+                if has_features:
+                    self.assertIn(key, record["evaluation_linear"])
+                    self.assertIn("convergence_warnings", record["evaluation_linear"])
                 self.assertEqual(record["n_folds"], 2)
                 self.assertEqual(np.shape(record["gram"]), (12, 12))
             output = Path(tmp)/"gram.json"
@@ -119,6 +134,78 @@ class ExpsTests(unittest.TestCase):
                             "--methods", "mc_fixed", "--output", str(output), *FAST)
             [record] = json.loads(output.read_text())["records"]
             self.assertEqual(record["status"], "skipped")
+
+    def test_q_and_n_sampling_on_local_data(self):
+        graphs = toy_graphs()
+        with tempfile.TemporaryDirectory() as tmp:
+            write_tu(tmp, "TOYC", graphs, [0]*6+[1]*6)
+            write_tu(tmp, "TOYR", graphs, [len(g)+0.5*(i % 2) for i, g in enumerate(graphs)], regression=True)
+            shared = ["--datasets", "TOYC", "TOYR", "--root-dir", tmp, "--n-repeats", "2", "--lambdas", "0.3",
+                      "--n-splits", "2", "--inner-splits", "2", "--c-values", "1", "--epsilon-values", "0.1"]
+            output = Path(tmp)/"q.json"
+            self.run_script("q_sampling.py", *shared, "--m-values", "20", "--mix-eps", "0", "0.1",
+                            "--proposals", "uniform", "freq:2", "sq_mean", "random", "--with-gvoys",
+                            "--n-samples-gvoys", "3", "--output", str(output))
+            data = json.loads(output.read_text())
+            self.assertEqual(len(data["references"]), 2)
+            # uniform once, three proposals with two mixing weights, GVoys; per dataset.
+            self.assertEqual(len(data["aggregates"]), 2*(1+3*2+1))
+            for aggregate in data["aggregates"]:
+                self.assertEqual(aggregate["n_ok"], 2)
+                self.assertIn("rel_mse", aggregate)
+                if aggregate["proposal"] != "gvoys":
+                    self.assertGreater(aggregate["ridge_rel"], 0)
+                    records = [r for r in data["records"] if r["proposal"] == aggregate["proposal"]]
+                    for record in records:
+                        self.assertTrue({"evaluation", "evaluation_biased", "evaluation_biased_linear"} <= set(record))
+                        self.assertNotIn("evaluation_linear", record)
+                    self.assertIn("mean_accuracy_biased_over_seeds" if aggregate["task"] == "classification"
+                                  else "mean_rmse_biased_over_seeds", aggregate)
+                if aggregate["proposal"] in ("uniform", "freq:2", "sq_mean"):
+                    self.assertAlmostEqual(sum(aggregate["q"].values()), 1)
+                    self.assertEqual(aggregate["bound_finite"], 0.3 < aggregate["q_min"])
+            self.assertEqual(len(data["records"]), 2*len(data["aggregates"]))
+            output = Path(tmp)/"n.json"
+            self.run_script("n_sampling.py", *shared, "--n-values", "1", "4", "--budgets", "40",
+                            "--lengths", "10", "--skip-evaluation", "--output", str(output))
+            aggregates = json.loads(output.read_text())["aggregates"]
+            designs = {(a["dataset"], a["design"], a["n"]): a for a in aggregates}
+            self.assertEqual(designs["TOYC", "fixed_budget", 4]["lengths"], 10)
+            self.assertEqual(designs["TOYC", "fixed_lengths", 4]["budget"], 40)
+            self.assertIn("variance_bound", designs["TOYC", "fixed_budget", 1])
+            self.run_script("plot_results.py", str(Path(tmp)/"q.json"), str(output), "--out-dir", tmp)
+            self.assertTrue((Path(tmp)/"q_TOYR_lambda0.3.json").exists())
+            self.assertTrue((Path(tmp)/"n_TOYC_lambda0.3.png").exists())
+
+    def test_feature_normalization_matches_gram_normalization(self):
+        from dataset_bench import normalize_gram_matrix
+        rng = np.random.default_rng(1)
+        X = rng.standard_normal((12, 30))
+        rows = X/np.linalg.norm(X, axis=1)[:, None]
+        np.testing.assert_allclose(rows @ rows.T, normalize_gram_matrix(X @ X.T), atol=1e-12)
+
+    def test_linear_models_on_separable_features(self):
+        import argparse
+        rng = np.random.default_rng(0)
+        y = np.repeat([0, 1, 2], 12)
+        X = np.eye(3)[y]*5+0.1*rng.standard_normal((36, 3))+1
+        args = argparse.Namespace(no_normalize=False, c_values=[1., 10.], epsilon_values=[0.1], n_splits=3,
+                                  n_cv_repeats=1, inner_splits=2, linear_max_iter=10000)
+        result = common.evaluate_features(X, y, "classification", args, 0)
+        self.assertEqual((result["mean_accuracy"], len(result["scores"])), (1.0, 3))
+        target = X @ np.array([1., -2., 0.5])
+        result = common.evaluate_features(X, target, "regression", args, 0)
+        self.assertGreater(result["mean_r2"], 0.8)
+
+    def test_proposals_follow_label_frequencies(self):
+        from exps.q_sampling import Labeled, proposal
+        data = Labeled("toy", [], None, "classification", [], [], [], [0, 1], np.array([0.8, 0.2]),
+                       np.array([0.5, 0.1]), {})
+        q = lambda spec, eps=0.: np.array(list(proposal(spec, data, eps, None).values()))
+        np.testing.assert_allclose(q("freq:2"), [16/17, 1/17])
+        np.testing.assert_allclose(q("inverse"), [0.2, 0.8])
+        np.testing.assert_allclose(q("sq_mean"), [5/6, 1/6])
+        np.testing.assert_allclose(q("freq:1", 0.5), [0.65, 0.35])
 
     def test_loader_reads_regression_targets_and_edge_labels(self):
         graphs = toy_graphs()

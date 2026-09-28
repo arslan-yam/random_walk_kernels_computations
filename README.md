@@ -73,6 +73,14 @@ The resulting raw estimate is unbiased and symmetric, but **not necessarily
 positive semidefinite (PSD)**. Gram normalization or PSD projection generally
 changes its expectation. No automatic PSD projection is applied.
 
+`--mc-diagonal biased` keeps the diagonal of $\frac{C}{M}\bar F\bar F^\top$
+instead. That matrix is PSD, and its diagonal exceeds the unbiased one by
+$\frac{C}{M}\sum_s\big((F_{1,is}-F_{2,is})/2\big)^2\ge0$ in every run. In
+expectation this adds $\tau_i=\frac{C}{2}\,\mathbb E[\operatorname{Var}(F_i\mid\text{lengths, labels})]$,
+a graph-dependent ridge that does not shrink with $M$. Off-diagonal entries are
+identical in both versions. The Python API also accepts `diagonal="both"`,
+which returns both Grams from one run.
+
 GVoys uses one feature realization per graph and outer sample, with its
 left/right walk constructions. Its dataset matrix is $FF^\top/M$, including
 the diagonal, and is PSD up to numerical roundoff. There is no extra replica
@@ -226,6 +234,7 @@ of random vertex weights is not automatically invariant to vertex relabeling.
 | `--n-label-samples-per-length` | `1` | **Labeled MC:** number $n$ of independent label sequences conditional on each length. |
 | `--n-walk-reps` | `1` | **Labeled MC:** trajectories averaged inside each of the two replicas, per sequence and graph. |
 | `--q-sampling-kind` | `uniform` | **Labeled MC:** proposal for labels: `uniform`, `random`, `norm_fro`, or `norm_l1`. |
+| `--mc-diagonal` | `unbiased` | MC diagonal: `unbiased` (replica cross product) or `biased` (PSD, ridge-like; see above). |
 | `--n-samples-gvoys` | `200` | Number of outer GVoys samples. Each sample uses one left/right walk construction per graph, with walks from vertices with nonzero boundary weight. No extra replica is generated. |
 | `--p-halt` | `0.2` | GVoys halt probability in $(0,1)$; expected sampled side length is $(1-p)/p$. |
 | `--anchor-fraction` | `1.0` | GVoys anchor fraction in $(0,1]$: `max(1, floor(fraction * number_of_vertices))` anchors. |

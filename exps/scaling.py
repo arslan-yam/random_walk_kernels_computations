@@ -74,7 +74,7 @@ def run_size(n_nodes, args, config, labeled, c, repeat, tag):
     seed = args.seed+repeat
     Ps, vs, ws, input_time = common.timed_inputs(graphs, args.u_w_distribution, labeled, seed)
     runs = common.expand_methods(args.methods, n_nodes, args.mc_fixed_m, c)
-    records, _ = common.compute_methods(runs, Ps, vs, ws, config, labeled, seed,
+    records, _, _ = common.compute_methods(runs, Ps, vs, ws, config, labeled, seed,
                                         max_nodes=n_nodes, args=args, tag=tag)
     stats = {"n_nodes": n_nodes, "repeat": repeat, "labeled": labeled, "lmbd": config.lmbd,
              "input_time_sec": input_time, **common.graph_stats(graphs, labeled)}

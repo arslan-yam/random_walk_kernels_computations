@@ -1,5 +1,6 @@
 """Mathematical regression checks; run: python -m unittest discover -s tests -v."""
 
+from dataclasses import replace
 import itertools
 import unittest
 from unittest.mock import patch
@@ -178,6 +179,42 @@ class DeterministicTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             utils.mu_func_gen("geom", 1)
 
+    def test_explicit_proposal_and_diagnostics(self):
+        Ps, vs, ws = inputs(True)
+        mu = utils.mu_func_gen("geom", 0.3)
+        args = (Ps, vs, ws, mu, "geom")
+        kwargs = dict(n_length_samples=41, n_label_samples_per_length=2, n_walk_reps=2, seed=5)
+        diagnostics = {}
+        explicit = mcrwk.random_walk_kernel_mc_labeled_dataset(*args, q_sampling_kind={0: 3., 1: 3.},
+                                                               diagnostics=diagnostics, **kwargs)
+        assert_array_equal(explicit, mcrwk.random_walk_kernel_mc_labeled_dataset(*args, **kwargs))
+        self.assertEqual(diagnostics["q"], {0: 0.5, 1: 0.5})
+        self.assertLessEqual(diagnostics["killed"]+diagnostics["skipped"], diagnostics["walks"])
+        self.assertTrue(0 < diagnostics["ess_fraction"] <= 1)
+        for bad in ({0: 1.}, {0: 1., 1: 0.}, {0: 1., 1: np.nan}):
+            with self.assertRaises(ValueError):
+                mcrwk.random_walk_kernel_mc_labeled_dataset(*args, q_sampling_kind=bad, **kwargs)
+
+    def test_biased_diagonal_shares_walks_and_is_psd(self):
+        for labeled in (False, True):
+            Ps, vs, ws = inputs(labeled)
+            config = KernelConfig(lmbd=0.3, n_samples_mc=60)
+            unbiased = compute_kernel("mc", Ps, vs, ws, config, seed=4, labeled=labeled)
+            biased = compute_kernel("mc", Ps, vs, ws, replace(config, mc_diagonal="biased"), seed=4, labeled=labeled)
+            off = ~np.eye(len(Ps), dtype=bool)
+            assert_array_equal(unbiased[off], biased[off])
+            # The excess C/M * sum((F1-F2)/2)^2 is nonnegative in every run, not only on average.
+            self.assertTrue(np.all(np.diag(biased) >= np.diag(unbiased)))
+            self.assertGreaterEqual(np.linalg.eigvalsh(biased).min(), -1e-14)
+            mu = utils.mu_func_gen("geom", 0.3)
+            both = (mcrwk.random_walk_kernel_mc_labeled_dataset(Ps, vs, ws, mu, "geom", n_length_samples=60,
+                        n_label_samples_per_length=1, seed=4, diagonal="both") if labeled else
+                    mcrwk.random_walk_kernel_mc_dataset(Ps, vs, ws, mu, "geom", 60, 4, diagonal="both"))
+            assert_array_equal(both[0], unbiased)
+            assert_array_equal(both[1], biased)
+        with self.assertRaises(ValueError):
+            KernelConfig(mc_diagonal="psd").validate()
+
     def test_error_metrics_do_not_divide_by_zero(self):
         errors = gram.matrix_errors(np.zeros((2,2)), np.eye(2))
         self.assertEqual(errors["mean_abs"], 0.5)
@@ -212,6 +249,27 @@ class StatisticalTests(unittest.TestCase):
                         if method == "gvoys":
                             for K in runs:
                                 self.assertGreaterEqual(np.linalg.eigvalsh(K).min(), -1e-12)
+
+    def test_skewed_explicit_proposal_is_unbiased(self):
+        Ps, vs, ws = inputs(True)
+        mu = utils.mu_func_gen("geom", 0.3)
+        exact = compute_kernel("direct", Ps, vs, ws, KernelConfig(lmbd=0.3), labeled=True)
+        runs = np.array([mcrwk.random_walk_kernel_mc_labeled_dataset(Ps, vs, ws, mu, "geom",
+                         n_length_samples=180, n_label_samples_per_length=1,
+                         q_sampling_kind={0: 0.8, 1: 0.2}, seed=seed) for seed in range(24)])
+        se = runs.std(axis=0, ddof=1)/np.sqrt(len(runs))
+        self.assertTrue(np.all(abs(runs.mean(axis=0)-exact) <= 6*se+1e-5))
+
+    def test_biased_diagonal_adds_a_nonnegative_ridge(self):
+        # E[biased diagonal] = K_ii + tau_i with tau_i >= 0; off-diagonal stays unbiased.
+        Ps, vs, ws = inputs(True)
+        config = KernelConfig(lmbd=0.3, n_samples_mc=180, mc_diagonal="biased")
+        exact = compute_kernel("direct", Ps, vs, ws, config, labeled=True)
+        runs = np.array([compute_kernel("mc", Ps, vs, ws, config, seed=seed, labeled=True) for seed in range(24)])
+        se = runs.std(axis=0, ddof=1)/np.sqrt(len(runs))
+        off = ~np.eye(len(Ps), dtype=bool)
+        self.assertTrue(np.all(abs(runs.mean(axis=0)-exact)[off] <= 6*se[off]+1e-5))
+        self.assertTrue(np.all(np.diag(runs.mean(axis=0)) >= np.diag(exact)-6*np.diag(se)))
 
     def test_gvoys_independent_self_pair_against_exact(self):
         Ps, vs, ws = inputs(True)
